@@ -50,8 +50,9 @@ export async function fetchJSON<T>(
       headers: opts.headers,
     });
     if (!res.ok) {
+      const bodyText = await res.text();
       throw new ApiError(
-        `HTTP ${res.status}`,
+        `HTTP ${res.status}: ${bodyText.slice(0, 120)}`,
         res.status,
       );
     }

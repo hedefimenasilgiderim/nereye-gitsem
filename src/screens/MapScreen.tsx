@@ -12,6 +12,7 @@ import { getNearbyPlaces } from "../services/osm";
 import type { Coordinates, Place } from "../models/types";
 import { NavigateButton } from "../components/NavigateButton";
 import { OfflineBanner, errorToMessage } from "../components/states";
+import { StaleDataBanner } from "../components/StaleDataBanner";
 import { getCategory } from "../data/categories";
 
 const MapView = lazy(() =>
@@ -25,6 +26,7 @@ export function MapScreen() {
   const [places, setPlaces] = useState<Place[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<unknown>(null);
+  const [stale, setStale] = useState(false);
   const [selected, setSelected] = useState<Place | null>(null);
   const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set());
   const [tilesOffline, setTilesOffline] = useState(false);
@@ -39,10 +41,12 @@ export function MapScreen() {
     let cancelled = false;
     setStatus("loading");
     setError(null);
+    setStale(false);
     getNearbyPlaces({ center, radius: 8000, limit: 120 })
-      .then((r) => {
+      .then((result) => {
         if (cancelled) return;
-        setPlaces(r);
+        setPlaces(result.places);
+        setStale(result.stale);
         setStatus("ready");
       })
       .catch((err) => {
@@ -92,7 +96,10 @@ export function MapScreen() {
       {/* Kategori filtre şeridi */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[500]">
         <div className="safe-top bg-gradient-to-b from-black/40 to-transparent px-3 pb-6 pt-3">
-          <OfflineBanner show={tilesOffline || status === "error"} />
+          <OfflineBanner show={tilesOffline || (status === "error" && !stale)} />
+          {stale && status === "ready" && places.length > 0 && (
+            <StaleDataBanner className="mt-2" />
+          )}
           <div className="no-scrollbar mt-1 flex gap-2 overflow-x-auto">
             <button
               onClick={() => setActiveCategories(new Set())}
@@ -136,9 +143,11 @@ export function MapScreen() {
           <button
             onClick={() => {
               setStatus("loading");
+              setStale(false);
               getNearbyPlaces({ center, radius: 8000, limit: 120 })
                 .then((r) => {
-                  setPlaces(r);
+                  setPlaces(r.places);
+                  setStale(r.stale);
                   setStatus("ready");
                 })
                 .catch((e) => {

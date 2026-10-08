@@ -11,6 +11,7 @@ import { searchPlaces } from "../services/osm";
 import type { Place } from "../models/types";
 import { PlaceCard } from "../components/PlaceCard";
 import { ErrorState, LoadingBlock } from "../components/states";
+import { StaleDataBanner } from "../components/StaleDataBanner";
 import { getCategory } from "../data/categories";
 import { CITIES, findCityByName, normalizeTr } from "../data/cities";
 
@@ -23,6 +24,7 @@ export function SearchOverlay() {
   const [results, setResults] = useState<Place[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState<unknown>(null);
+  const [stale, setStale] = useState(false);
   const debounceRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -47,10 +49,12 @@ export function SearchOverlay() {
     }
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     setStatus("loading");
+    setStale(false);
     debounceRef.current = window.setTimeout(async () => {
       try {
         const r = await searchPlaces(q, origin);
-        setResults(r);
+        setResults(r.places);
+        setStale(r.stale);
         setStatus("ready");
       } catch (err) {
         setError(err);
@@ -100,6 +104,10 @@ export function SearchOverlay() {
             </span>
             <span>→</span>
           </button>
+        )}
+
+        {stale && status === "ready" && results.length > 0 && (
+          <StaleDataBanner className="mb-3" />
         )}
 
         {status === "idle" && (

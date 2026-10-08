@@ -174,12 +174,13 @@ export const localEngine: AIProvider = {
           : "Bulunduğun bölge için";
 
     try {
-      let places = await getNearbyPlaces({
+      const { places: raw } = await getNearbyPlaces({
         center,
         radius: intent.nearMe ? 5000 : 15000,
         categoryIds: intent.categoryIds,
         limit: 100,
       });
+      let places = raw;
 
       if (intent.freeOnly) places = filterFree(places);
 

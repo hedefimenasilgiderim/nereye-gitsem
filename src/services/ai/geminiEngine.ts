@@ -169,7 +169,7 @@ export const geminiEngine: AIProvider = {
           : "kullanıcı konumu biliniyor";
 
     try {
-      const places = await getNearbyPlaces({
+      const { places } = await getNearbyPlaces({
         center,
         radius: intent.nearMe ? 5000 : 15000,
         categoryIds: intent.categoryIds,

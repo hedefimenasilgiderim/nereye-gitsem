@@ -1,56 +1,166 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createHash } from "node:crypto";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS Başlıkları
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+const MIRRORS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+  "https://overpass.osm.jp/api/interpreter",
+];
+
+const MIRROR_TIMEOUT_MS = 8000;
+const RETRY_ROUNDS = 2; // kamu sunucuları aşırı yüklü; aynı sorguya ilk turda
+// 504 dönen overpass-api.de ikinci turda 200 döndü (canlı test, 08.10.2026).
+const TOTAL_BUDGET_MS = 45000; // maxDuration=60 altında kalacak en kötü süre
+const CACHE_TTL_MS = 60 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 200;
+
+export const maxDuration = 60;
+
+interface CacheEntry {
+  body: string;
+  expiry: number;
+}
+
+const cache = new Map<string, CacheEntry>();
+
+function hashKey(query: string): string {
+  return createHash("sha256").update(query).digest("hex").slice(0, 16);
+}
+
+function setCache(key: string, body: string) {
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
+  }
+  cache.set(key, { body, expiry: Date.now() + CACHE_TTL_MS });
+}
+
+function getCache(key: string): string | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiry < Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.body;
+}
+
+function setCacheHeaders(res: VercelResponse) {
+  res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600");
+}
+
+async function fetchMirror(
+  query: string,
+  url: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+      "User-Agent": "NereyeGitsem/1.3.2 (Vercel Proxy)",
+    },
+    body: "data=" + encodeURIComponent(query),
+    signal,
+  });
+}
+
+interface MirrorResult {
+  body: string;
+  ok: boolean;
+  lastStatus: number;
+  errors: string[];
+}
+
+async function tryMirrors(query: string): Promise<MirrorResult> {
+  const errors: string[] = [];
+  let lastStatus = 0;
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+
+  for (let round = 0; round < RETRY_ROUNDS; round++) {
+    for (const url of MIRRORS) {
+      if (Date.now() > deadline) {
+        errors.push("total time budget exhausted");
+        return { body: "", ok: false, lastStatus, errors };
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), MIRROR_TIMEOUT_MS);
+      try {
+        const res = await fetchMirror(query, url, controller.signal);
+        lastStatus = res.status;
+        const text = await res.text();
+        if (res.ok) {
+          try {
+            JSON.parse(text);
+            return { body: text, ok: true, lastStatus, errors };
+          } catch {
+            errors.push(`${url}: invalid JSON response`);
+          }
+        } else {
+          errors.push(`${url}: HTTP ${res.status}`);
+        }
+      } catch (err) {
+        errors.push(
+          `${url}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  return { body: "", ok: false, lastStatus, errors };
+}
+
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    "Access-Control-Allow-Methods",
+    "GET,OPTIONS,PATCH,DELETE,POST,PUT",
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version",
   );
 
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     res.status(200).end();
     return;
   }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  try {
-    const { query } = req.body || {};
-    if (!query) {
-      return res.status(400).json({ error: 'Query parameter is missing' });
-    }
-
-    // Overpass API'ye istek
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: 'data=' + encodeURIComponent(query)
-    });
-
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      // Yedek sunucu
-      const fallbackRes = await fetch('https://overpass.kumi.systems/api/interpreter', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: 'data=' + encodeURIComponent(query)
-      });
-      const fallbackText = await fallbackRes.text();
-      return res.status(fallbackRes.status).send(fallbackText);
-    }
-
-    return res.status(200).send(responseText);
-  } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Server error' });
+  const { query } = (req.body as { query?: unknown }) || {};
+  if (!query || typeof query !== "string") {
+    return res.status(400).json({ error: "Query parameter is missing" });
   }
+
+  const key = hashKey(query);
+  const cached = getCache(key);
+  if (cached) {
+    setCacheHeaders(res);
+    return res.status(200).send(cached);
+  }
+
+  const result = await tryMirrors(query);
+  if (result.ok) {
+    setCache(key, result.body);
+    setCacheHeaders(res);
+    return res.status(200).send(result.body);
+  }
+
+  return res.status(502).json({
+    error: "All Overpass mirrors failed",
+    status: result.lastStatus,
+    details: result.errors,
+  });
 }

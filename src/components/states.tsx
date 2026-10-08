@@ -4,7 +4,7 @@
  */
 
 import type { ReactNode } from "react";
-import { OfflineError } from "../services/http";
+import { ApiError, OfflineError } from "../services/http";
 
 export function LoadingBlock({ label = "Yükleniyor..." }: { label?: string }) {
   return (
@@ -42,6 +42,16 @@ interface ErrorStateProps {
 
 export function errorToMessage(error: unknown): string {
   if (error instanceof OfflineError) return "İnternet bağlantın yok. Bağlantın geri geldiğinde tekrar dene.";
+  if (error instanceof ApiError) {
+    if (error.status === 429) return "Sunucuya çok fazla istek gitti. Biraz bekleyip tekrar dene.";
+    if (error.status === 502 || error.status === 504) return "Overpass sunucuları şu an yoğun. Daha sonra tekrar dene.";
+    if (error.status === 406) return "Sunucu isteği reddetti. Biraz bekleyip tekrar dene.";
+    if (error.status === 500) return "Proxy sunucusunda bir hata oluştu. Daha sonra tekrar dene.";
+    if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError"))
+      return "Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.";
+    if (error.message.includes("Zaman aşımı")) return "Sunucu yanıt vermedi. Daha sonra tekrar dene.";
+    return error.message;
+  }
   if (error instanceof Error) {
     if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError"))
       return "Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.";

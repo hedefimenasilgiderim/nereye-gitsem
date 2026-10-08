@@ -48,7 +48,18 @@ export function cacheSet<T>(key: string, value: T, ttlMs: number) {
   writeLS(key, entry);
 }
 
-/** cache → stale-fallback → fn akışı: cache varsa ağa hiç gitmez. */
+export function cacheGetStale<T>(key: string): T | null {
+  const mem = MEM.get(key);
+  if (mem) return mem.v as T;
+  const ls = readLS(key);
+  if (ls) {
+    MEM.set(key, ls);
+    return ls.v as T;
+  }
+  return null;
+}
+
+/** cache → fn akışı: cache varsa ağa hiç gitmez. */
 export async function cached<T>(
   key: string,
   ttlMs: number,
@@ -59,4 +70,24 @@ export async function cached<T>(
   const value = await fn();
   cacheSet(key, value, ttlMs);
   return value;
+}
+
+/** cache → stale-fallback → fn akışı. Ağ başarısız olursa eski cache döner. */
+export async function cachedWithStale<T>(
+  key: string,
+  ttlMs: number,
+  fn: () => Promise<T>,
+): Promise<{ value: T; stale: boolean }> {
+  const fresh = cacheGet<T>(key);
+  if (fresh !== null) return { value: fresh, stale: false };
+
+  try {
+    const value = await fn();
+    cacheSet(key, value, ttlMs);
+    return { value, stale: false };
+  } catch (err) {
+    const stale = cacheGetStale<T>(key);
+    if (stale !== null) return { value: stale, stale: true };
+    throw err;
+  }
 }

@@ -10,8 +10,8 @@
 
 import type { Coordinates, Place, PlaceRef } from "../models/types";
 import { CATEGORIES } from "../data/categories";
-import { cached } from "./cache";
-import { ApiError, fetchJSON, qs } from "./http";
+import { cached, cachedWithStale } from "./cache";
+import { fetchJSON, qs } from "./http";
 
 // Tüm Overpass trafiği Vercel proxy üzerinden geçer (tarayıcı WAF
 // engeline takılmamak için). Proxy, overpass-api.de + kumi fallback yapar.
@@ -40,22 +40,18 @@ interface OverpassResponse {
 
 async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   const normalized = ql.trimStart().startsWith("[out:json]")
-    ? ql.replace(/\[timeout:\d+\]/, "[timeout:10]")
-    : `[out:json][timeout:10];\n${ql}`;
-  const query = normalized.includes("[timeout:10]")
+    ? ql.replace(/\[timeout:\d+\]/, "[timeout:8]")
+    : `[out:json][timeout:8];\n${ql}`;
+  const query = normalized.includes("[timeout:8]")
     ? normalized
-    : normalized.replace("[out:json]", "[out:json][timeout:10]");
-  try {
-    const res = await fetchJSON<OverpassResponse>(OVERPASS_PROXY, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-      timeoutMs: 30000,
-    });
-    return res.elements ?? [];
-  } catch (err) {
-    throw err instanceof Error ? err : new ApiError("Overpass erişilemedi");
-  }
+    : normalized.replace("[out:json]", "[out:json][timeout:8]");
+  const res = await fetchJSON<OverpassResponse>(OVERPASS_PROXY, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+    timeoutMs: 30000,
+  });
+  return res.elements ?? [];
 }
 
 // ------------------------------------------------------- Kategori eşleme
@@ -236,7 +232,12 @@ export class NoSourceError extends Error {
   }
 }
 
-export async function getNearbyPlaces(opts: NearbyOptions): Promise<Place[]> {
+export interface NearbyResult {
+  places: Place[];
+  stale: boolean;
+}
+
+export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult> {
   const { center } = opts;
   const radius = opts.radius ?? 4000;
   const limit = opts.limit ?? 80;
@@ -253,7 +254,7 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<Place[]> {
     (opts.categoryIds ?? []).join(",") || "all"
   }:${limit}`;
 
-  return cached(key, TTL_NEARBY, async () => {
+  const { value, stale } = await cachedWithStale(key, TTL_NEARBY, async () => {
     const elements = await queryOverpass(ql);
     const seen = new Set<string>();
     const places: Place[] = [];
@@ -266,6 +267,8 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<Place[]> {
     places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
     return places;
   });
+
+  return { places: value, stale };
 }
 
 // ------------------------------------------------------------ Nominatim
@@ -338,36 +341,41 @@ function nominatimToPlace(r: NominatimResult, origin?: Coordinates): Place {
  * Serbest metin arama (isim, şehir, ilçe, kategori, konum).
  * Nominatim üzerinden gerçek sonuçlar döner; sonuç yoksa boş dizi döner.
  */
+export interface SearchResult {
+  places: Place[];
+  stale: boolean;
+}
+
 export async function searchPlaces(
   query: string,
   origin?: Coordinates,
-): Promise<Place[]> {
+): Promise<SearchResult> {
   const q = query.trim();
-  if (q.length < 2) return [];
+  if (q.length < 2) return { places: [], stale: false };
 
-  return cached(
-    `search:${q.toLocaleLowerCase("tr-TR")}:${origin
-      ? `${origin.lat.toFixed(2)},${origin.lon.toFixed(2)}`
-      : "no"}`,
-    TTL_SEARCH,
-    async () => {
-      const url = `${NOMINATIM}/search?${qs({
-        q,
-        format: "jsonv2",
-        addressdetails: 1,
-        extratags: 1,
-        limit: 12,
-        "accept-language": "tr",
-        countrycodes: "tr",
-      })}`;
-      const results = await fetchJSON<NominatimResult[]>(url, {
-        timeoutMs: 12000,
-      });
-      return results
-        .filter((r) => r.osm_type && r.osm_id)
-        .map((r) => nominatimToPlace(r, origin));
-    },
-  );
+  const key = `search:${q.toLocaleLowerCase("tr-TR")}:${origin
+    ? `${origin.lat.toFixed(2)},${origin.lon.toFixed(2)}`
+    : "no"}`;
+
+  const { value, stale } = await cachedWithStale(key, TTL_SEARCH, async () => {
+    const url = `${NOMINATIM}/search?${qs({
+      q,
+      format: "jsonv2",
+      addressdetails: 1,
+      extratags: 1,
+      limit: 12,
+      "accept-language": "tr",
+      countrycodes: "tr",
+    })}`;
+    const results = await fetchJSON<NominatimResult[]>(url, {
+      timeoutMs: 12000,
+    });
+    return results
+      .filter((r) => r.osm_type && r.osm_id)
+      .map((r) => nominatimToPlace(r, origin));
+  });
+
+  return { places: value, stale };
 }
 
 /** Kullanıcının bulunduğu şehri ters geocode ile bulur (isim için). */
@@ -438,7 +446,7 @@ export async function getPlaceDetail(
       R: "relation",
     };
     const osmType = typeMap[ref.osmType];
-    const ql = `[out:json][timeout:10];\n${osmType}(id:${ref.osmId});\nout center 15;`;
+    const ql = `[out:json][timeout:8];\n${osmType}(id:${ref.osmId});\nout center 15;`;
     try {
       const elements = await queryOverpass(ql);
       const el = elements.find(

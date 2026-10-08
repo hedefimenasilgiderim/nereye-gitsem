@@ -19,6 +19,7 @@ import {
   LoadingBlock,
   SkeletonList,
 } from "../components/states";
+import { StaleDataBanner } from "../components/StaleDataBanner";
 
 export function DiscoverScreen() {
   const nav = useNavigation();
@@ -34,6 +35,7 @@ export function DiscoverScreen() {
   const [places, setPlaces] = useState<Place[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<unknown>(null);
+  const [stale, setStale] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   // Merkez nokta: kullanıcı konumu > seçili şehir > ilk büyük şehir önerisi
@@ -62,6 +64,7 @@ export function DiscoverScreen() {
     let cancelled = false;
     setState("loading");
     setError(null);
+    setStale(false);
 
     const radius = activeFilter ? 12000 : location.status === "granted" ? 4000 : 8000;
     getNearbyPlaces({
@@ -72,11 +75,12 @@ export function DiscoverScreen() {
     })
       .then((result) => {
         if (cancelled) return;
-        let list = result;
+        let list = result.places;
         if (activeFilter?.preferFree) {
           list = list.filter((p) => p.tags.fee !== "yes" && !p.tags.charge);
         }
         setPlaces(list);
+        setStale(result.stale);
         setState("ready");
       })
       .catch((err) => {
@@ -250,6 +254,9 @@ export function DiscoverScreen() {
             )}
           </div>
 
+          {stale && state === "ready" && places.length > 0 && (
+            <StaleDataBanner />
+          )}
           {!center ? (
             <EmptyState
               emoji="📍"
