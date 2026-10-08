@@ -24,7 +24,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: "#16a34a",
     tagFilters: [
       { leisure: ["park", "garden", "nature_reserve"] },
-      { natural: ["wood", "scrub"] },
+      { natural: ["wood", "scrub", "grassland", "wetland"] },
     ],
   },
   {
@@ -32,21 +32,30 @@ export const CATEGORIES: CategoryDef[] = [
     label: "Deniz / Plaj",
     emoji: "🌊",
     color: "#0284c7",
-    tagFilters: [{ natural: ["beach"] }],
+    tagFilters: [
+      { natural: ["beach"] },
+      { leisure: ["beach_resort"] },
+    ],
   },
   {
     id: "cafe",
     label: "Kafe",
     emoji: "☕",
     color: "#92400e",
-    tagFilters: [{ amenity: ["cafe"] }],
+    tagFilters: [
+      { amenity: ["cafe", "fast_food"] },
+      { shop: ["coffee", "bakery"] },
+    ],
   },
   {
     id: "restaurant",
     label: "Restoran",
     emoji: "🍽️",
     color: "#dc2626",
-    tagFilters: [{ amenity: ["restaurant"] }],
+    tagFilters: [
+      { amenity: ["restaurant", "food_court"] },
+      { amenity: ["bar", "pub"] },
+    ],
   },
   {
     id: "attraction",
@@ -71,7 +80,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "🛍️",
     color: "#db2777",
     tagFilters: [
-      { shop: ["mall", "department_store", "marketplace"] },
+      { shop: ["mall", "department_store", "marketplace", "clothes", "boutique"] },
+      { amenity: ["marketplace"] },
     ],
   },
   {
@@ -80,8 +90,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "🎮",
     color: "#4f46e5",
     tagFilters: [
-      { amenity: ["cinema", "theatre", "nightclub"] },
-      { leisure: ["amusement_arcade", "escape_game"] },
+      { amenity: ["cinema", "theatre", "nightclub", "arts_centre"] },
+      { leisure: ["amusement_arcade", "escape_game", "bowling_alley"] },
     ],
   },
   {

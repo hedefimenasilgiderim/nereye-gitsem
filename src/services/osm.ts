@@ -40,11 +40,11 @@ interface OverpassResponse {
 
 async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   const normalized = ql.trimStart().startsWith("[out:json]")
-    ? ql.replace(/\[timeout:\d+\]/, "[timeout:8]")
-    : `[out:json][timeout:8];\n${ql}`;
-  const query = normalized.includes("[timeout:8]")
+    ? ql.replace(/\[timeout:\d+\]/, "[timeout:5]")
+    : `[out:json][timeout:5];\n${ql}`;
+  const query = normalized.includes("[timeout:5]")
     ? normalized
-    : normalized.replace("[out:json]", "[out:json][timeout:8]");
+    : normalized.replace("[out:json]", "[out:json][timeout:5]");
   const res = await fetchJSON<OverpassResponse>(OVERPASS_PROXY, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -203,14 +203,15 @@ function buildAroundQuery(opts: {
             : value.includes("|")
               ? `["${key}"~"${value}"]`
               : `["${key}"="${value}"]`;
-        lines.push(`nwr${tagExpr}${around};`);
+        // nw = node+way: ağır relation taraması yapılmaz (hız için).
+        lines.push(`nw${tagExpr}${around};`);
       }
     }
   }
 
   if (lines.length === 0) return null;
   const limit = opts.radius > 5000 ? 15 : opts.limit;
-  return `[out:json][timeout:10];\n(\n${lines.join("\n")}\n);\nout center ${limit};`;
+  return `[out:json][timeout:5];\n(\n${lines.join("\n")}\n);\nout center ${limit};`;
 }
 
 export interface NearbyOptions {
@@ -446,7 +447,7 @@ export async function getPlaceDetail(
       R: "relation",
     };
     const osmType = typeMap[ref.osmType];
-    const ql = `[out:json][timeout:8];\n${osmType}(id:${ref.osmId});\nout center 15;`;
+    const ql = `[out:json][timeout:5];\n${osmType}(id:${ref.osmId});\nout center 15;`;
     try {
       const elements = await queryOverpass(ql);
       const el = elements.find(
