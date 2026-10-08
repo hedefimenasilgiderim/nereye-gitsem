@@ -225,6 +225,174 @@ export const FALLBACK_PLACES: Place[] = [
     images: [],
     tags: {},
   },
+  {
+    placeId: "local:kleopatra-plaji",
+    name: "Kleopatra Plajı",
+    latitude: 36.5446,
+    longitude: 31.9963,
+    categoryId: "beach",
+    city: "Antalya",
+    district: "Alanya",
+    description: "Alanya'nın ünlü ince kumlu plajı.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:mandabatmaz",
+    name: "Mandabatmaz",
+    latitude: 41.0314,
+    longitude: 28.9759,
+    categoryId: "cafe",
+    city: "İstanbul",
+    district: "Beyoğlu",
+    description: "Beyoğlu'nun köklü, sıcak çikolatasıyla ünlü kahvehanesi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:ciya-sofrasi",
+    name: "Çiya Sofrası",
+    latitude: 40.9899,
+    longitude: 29.0265,
+    categoryId: "restaurant",
+    city: "İstanbul",
+    district: "Kadıköy",
+    description: "Anadolu'nun kayıp lezzetlerini sunan ünlü lokanta.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:kanaat-lokantasi",
+    name: "Kanaat Lokantası",
+    latitude: 41.0246,
+    longitude: 29.0143,
+    categoryId: "restaurant",
+    city: "İstanbul",
+    district: "Üsküdar",
+    description: "1933'ten beri hizmet veren köklü Türk lokantası.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:istinye-park",
+    name: "İstinye Park",
+    latitude: 41.1081,
+    longitude: 29.1178,
+    categoryId: "shopping",
+    city: "İstanbul",
+    district: "Sarıyer",
+    description: "Mağaza, restoran ve sinema içeren büyük alışveriş merkezi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:kanyon",
+    name: "Kanyon",
+    latitude: 41.0796,
+    longitude: 29.0146,
+    categoryId: "shopping",
+    city: "İstanbul",
+    district: "Beşiktaş",
+    description: "Açık hava avlulu, modern mimarili alışveriş merkezi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:gebze-center",
+    name: "Gebze Center",
+    latitude: 40.8022,
+    longitude: 29.4377,
+    categoryId: "shopping",
+    city: "Kocaeli",
+    district: "Gebze",
+    description: "Gebze'nin merkezinde mağaza ve kafe alanları olan AVM.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:ankamall",
+    name: "AnkaMall",
+    latitude: 39.9624,
+    longitude: 32.7878,
+    categoryId: "shopping",
+    city: "Ankara",
+    district: "Yenimahalle",
+    description: "Ankara'nın büyük mağaza ve eğlence merkezlerinden biri.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:armada",
+    name: "Armada AVM",
+    latitude: 39.892,
+    longitude: 32.7996,
+    categoryId: "shopping",
+    city: "Ankara",
+    district: "Çankaya",
+    description: "Metro girişli, geniş mağaza ve sinema içeren AVM.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:forum-bornova",
+    name: "Forum Bornova",
+    latitude: 38.4664,
+    longitude: 27.2045,
+    categoryId: "shopping",
+    city: "İzmir",
+    district: "Bornova",
+    description: "Açık hava konseptli alışveriş ve yaşam merkezi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:markantalya",
+    name: "MarkAntalya",
+    latitude: 36.8962,
+    longitude: 30.7076,
+    categoryId: "shopping",
+    city: "Antalya",
+    district: "Muratpaşa",
+    description: "Şehir merkezinde mağaza ve kafeleri olan AVM.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:isfankbul",
+    name: "İsfanbul (Vialand)",
+    latitude: 41.0847,
+    longitude: 28.7953,
+    categoryId: "entertainment",
+    city: "İstanbul",
+    district: "Eyüpsultan",
+    description: "Lunapark, alışveriş ve gösteri alanları içeren tematik park.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:bursa-hayvanat-bahcesi",
+    name: "Bursa Hayvanat Bahçesi",
+    latitude: 40.2114,
+    longitude: 29.0716,
+    categoryId: "family",
+    city: "Bursa",
+    district: "Nilüfer",
+    description: "Soğanlı Botanik Park içinde geniş alanlı hayvanat bahçesi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:boga-heykeli",
+    name: "Kadıköy Boğa Heykeli",
+    latitude: 40.9885,
+    longitude: 29.029,
+    categoryId: "photo",
+    city: "İstanbul",
+    district: "Kadıköy",
+    description: "Kadıköy Altıyol'da sembolleşmiş buluşma noktası heykel.",
+    images: [],
+    tags: {},
+  },
 ];
 
 /**
@@ -250,12 +418,12 @@ function haversine(
 }
 
 /**
- * Acil durum listesini filtreler:
- * - Seçili kategorilerde kayıt yoksa genel listeye döner.
+ * Acil durum listesini KESİN kategori filtresiyle süzer:
+ * - Yalnızca seçili kategorilere ait mekanlar döner — başka kategorinin
+ *   mekanları asla karıştırılmaz (örn. Alışveriş'te park çıkmaz).
  * - Merkez verilirse yalnızca 20 km içindeki mekanlar kalır; uzak
  *   şehirlerin (örn. İstanbul) mekanları başka il/ilçede asla görünmez.
- * - Mesafe filtresi sonrası hiç kayıt kalmazsa BOŞ liste döner —
- *   uzağa ait veri basmak yerine boşluk göstermek doğrudur.
+ * - Filtre sonrası hiç kayıt kalmazsa BOŞ liste döner.
  */
 export function filterFallbackPlaces(opts: {
   center?: Coordinates;
@@ -265,8 +433,7 @@ export function filterFallbackPlaces(opts: {
   const limit = opts.limit ?? 20;
   let list = FALLBACK_PLACES;
   if (opts.categoryIds?.length) {
-    const filtered = list.filter((p) => opts.categoryIds!.includes(p.categoryId));
-    if (filtered.length > 0) list = filtered;
+    list = list.filter((p) => opts.categoryIds!.includes(p.categoryId));
   }
   if (opts.center) {
     list = list.filter(

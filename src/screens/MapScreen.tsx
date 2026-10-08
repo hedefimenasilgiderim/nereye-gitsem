@@ -11,8 +11,7 @@ import { CITIES } from "../data/cities";
 import { getNearbyPlaces } from "../services/osm";
 import type { Coordinates, Place } from "../models/types";
 import { NavigateButton } from "../components/NavigateButton";
-import { OfflineBanner, errorToMessage } from "../components/states";
-import { StaleDataBanner } from "../components/StaleDataBanner";
+import { OfflineBanner } from "../components/states";
 import { getCategory } from "../data/categories";
 
 const MapView = lazy(() =>
@@ -24,9 +23,7 @@ export function MapScreen() {
   const { location, selectedCity } = useAppState();
 
   const [places, setPlaces] = useState<Place[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [error, setError] = useState<unknown>(null);
-  const [stale, setStale] = useState(false);
+  const [status, setStatus] = useState<"loading" | "ready">("loading");
   const [selected, setSelected] = useState<Place | null>(null);
   const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set());
   const [tilesOffline, setTilesOffline] = useState(false);
@@ -40,19 +37,18 @@ export function MapScreen() {
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
-    setError(null);
-    setStale(false);
     getNearbyPlaces({ center, radius: 8000, limit: 120 })
       .then((result) => {
         if (cancelled) return;
         setPlaces(result.places);
-        setStale(result.stale);
         setStatus("ready");
       })
-      .catch((err) => {
+      .catch(() => {
+        // Ağ hataları servis içinde sessizce yerel veriye düşer; burada
+        // hata durumu gösterilmez.
         if (cancelled) return;
-        setError(err);
-        setStatus("error");
+        setPlaces([]);
+        setStatus("ready");
       });
     return () => {
       cancelled = true;
@@ -96,10 +92,7 @@ export function MapScreen() {
       {/* Kategori filtre şeridi */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[500]">
         <div className="safe-top bg-gradient-to-b from-black/40 to-transparent px-3 pb-6 pt-3">
-          <OfflineBanner show={tilesOffline || (status === "error" && !stale)} />
-          {stale && status === "ready" && places.length > 0 && (
-            <StaleDataBanner className="mt-2" />
-          )}
+          <OfflineBanner show={tilesOffline} />
           <div className="no-scrollbar mt-1 flex gap-2 overflow-x-auto">
             <button
               onClick={() => setActiveCategories(new Set())}
@@ -130,35 +123,10 @@ export function MapScreen() {
         </div>
       </div>
 
-      {/* Yükleme / hata */}
+      {/* Yükleme durumu */}
       {status === "loading" && (
         <div className="absolute inset-x-0 top-24 z-[500] mx-auto w-fit rounded-full bg-surface px-4 py-2 text-xs font-semibold text-muted shadow">
           Mekânlar yükleniyor...
-        </div>
-      )}
-      {status === "error" && (
-        <div className="absolute inset-x-4 top-24 z-[500] rounded-2xl bg-surface p-4 text-center shadow-lg">
-          <p className="text-sm font-semibold text-ink">Harita verisi alınamadı</p>
-          <p className="mt-1 text-xs text-muted">{errorToMessage(error)}</p>
-          <button
-            onClick={() => {
-              setStatus("loading");
-              setStale(false);
-              getNearbyPlaces({ center, radius: 8000, limit: 120 })
-                .then((r) => {
-                  setPlaces(r.places);
-                  setStale(r.stale);
-                  setStatus("ready");
-                })
-                .catch((e) => {
-                  setError(e);
-                  setStatus("error");
-                });
-            }}
-            className="mt-3 rounded-full bg-brand px-5 py-2 text-xs font-bold text-white"
-          >
-            Tekrar dene
-          </button>
         </div>
       )}
 

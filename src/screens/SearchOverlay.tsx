@@ -10,8 +10,7 @@ import { useAppState } from "../app/state";
 import { searchPlaces } from "../services/osm";
 import type { Place } from "../models/types";
 import { PlaceCard } from "../components/PlaceCard";
-import { ErrorState, LoadingBlock } from "../components/states";
-import { StaleDataBanner } from "../components/StaleDataBanner";
+import { LoadingBlock } from "../components/states";
 import { getCategory } from "../data/categories";
 import { CITIES, findCityByName, normalizeTr } from "../data/cities";
 
@@ -22,9 +21,7 @@ export function SearchOverlay() {
   const { location, setSelectedCity } = useAppState();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Place[]>([]);
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [error, setError] = useState<unknown>(null);
-  const [stale, setStale] = useState(false);
+  const [status, setStatus] = useState<"idle" | "loading" | "ready">("idle");
   const debounceRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -49,16 +46,15 @@ export function SearchOverlay() {
     }
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     setStatus("loading");
-    setStale(false);
     debounceRef.current = window.setTimeout(async () => {
       try {
         const r = await searchPlaces(q, origin);
         setResults(r.places);
-        setStale(r.stale);
         setStatus("ready");
-      } catch (err) {
-        setError(err);
-        setStatus("error");
+      } catch {
+        // Ağ hatası: sessizce boş sonuç — hata ekranı yok.
+        setResults([]);
+        setStatus("ready");
       }
     }, 450);
     return () => {
@@ -106,10 +102,6 @@ export function SearchOverlay() {
           </button>
         )}
 
-        {stale && status === "ready" && results.length > 0 && (
-          <StaleDataBanner className="mb-3" />
-        )}
-
         {status === "idle" && (
           <div className="space-y-4">
             <p className="text-sm font-bold text-ink-soft">Popüler aramalar</p>
@@ -133,13 +125,11 @@ export function SearchOverlay() {
 
         {status === "loading" && <LoadingBlock label="Aranıyor..." />}
 
-        {status === "error" && <ErrorState error={error} onRetry={() => setQuery((q) => q)} />}
-
         {status === "ready" && results.length === 0 && (
           <div className="flex flex-col items-center gap-2 rounded-2xl bg-surface px-6 py-10 text-center">
             <span className="text-3xl">🔍</span>
             <p className="font-semibold text-ink">
-              Aradığın yere ait sonuç bulunamadı.
+              Aradığın ifade için şimdilik kayıt yok.
             </p>
             <p className="text-sm text-muted">
               Yazımı kontrol et ya da farklı bir ifade dene.

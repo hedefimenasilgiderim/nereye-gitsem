@@ -10,16 +10,10 @@ import { useAppState } from "../app/state";
 import { CATEGORIES } from "../data/categories";
 import { DISCOVERY_MODES } from "../data/modes";
 import { CITIES } from "../data/cities";
-import { getNearbyPlaces, NoSourceError } from "../services/osm";
+import { getNearbyPlaces } from "../services/osm";
 import type { Place } from "../models/types";
 import { PlaceCard } from "../components/PlaceCard";
-import {
-  EmptyState,
-  ErrorState,
-  LoadingBlock,
-  SkeletonList,
-} from "../components/states";
-import { StaleDataBanner } from "../components/StaleDataBanner";
+import { EmptyState, LoadingBlock, SkeletonList } from "../components/states";
 
 export function DiscoverScreen() {
   const nav = useNavigation();
@@ -33,9 +27,7 @@ export function DiscoverScreen() {
   } | null>(null);
 
   const [places, setPlaces] = useState<Place[]>([]);
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
-  const [error, setError] = useState<unknown>(null);
-  const [stale, setStale] = useState(false);
+  const [state, setState] = useState<"loading" | "ready">("loading");
   const [reloadKey, setReloadKey] = useState(0);
 
   // Merkez nokta: kullanıcı konumu > seçili şehir > ilk büyük şehir önerisi
@@ -63,8 +55,6 @@ export function DiscoverScreen() {
     }
     let cancelled = false;
     setState("loading");
-    setError(null);
-    setStale(false);
 
     const radius = activeFilter ? 12000 : location.status === "granted" ? 4000 : 8000;
     getNearbyPlaces({
@@ -80,18 +70,14 @@ export function DiscoverScreen() {
           list = list.filter((p) => p.tags.fee !== "yes" && !p.tags.charge);
         }
         setPlaces(list);
-        setStale(result.stale);
         setState("ready");
       })
-      .catch((err) => {
+      .catch(() => {
+        // Yalnızca veri kaynağı olmayan kategoriler (Etkinlik) buraya düşer;
+        // ağ hataları servis içinde sessizce yerel veriye düşer.
         if (cancelled) return;
-        if (err instanceof NoSourceError) {
-          setPlaces([]);
-          setState("ready");
-        } else {
-          setError(err);
-          setState("error");
-        }
+        setPlaces([]);
+        setState("ready");
       });
 
     return () => {
@@ -254,9 +240,6 @@ export function DiscoverScreen() {
             )}
           </div>
 
-          {stale && state === "ready" && places.length > 0 && (
-            <StaleDataBanner />
-          )}
           {!center ? (
             <EmptyState
               emoji="📍"
@@ -278,17 +261,23 @@ export function DiscoverScreen() {
             />
           ) : state === "loading" ? (
             <SkeletonList rows={4} />
-          ) : state === "error" ? (
-            <ErrorState error={error} onRetry={() => setReloadKey((k) => k + 1)} />
           ) : places.length === 0 ? (
             <EmptyState
-              emoji="🔍"
+              emoji="🧭"
               title={
                 activeFilter
-                  ? `"${activeFilter.label}" için sonuç bulunamadı`
-                  : "Sonuç bulunamadı"
+                  ? `${activeFilter.label} için şimdilik öneri yok`
+                  : "Şimdilik burada öneri yok"
               }
-              description="Bu bölgede bu kriterlere uyan kayıtlı mekân yok. Başka bir kategori, mod veya şehir dene."
+              description="Kaynaklar birazdan güncellenebilir; tekrar denemek için dokun."
+              action={
+                <button
+                  onClick={() => setReloadKey((k) => k + 1)}
+                  className="mt-3 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white active:scale-95"
+                >
+                  Yenile
+                </button>
+              }
             />
           ) : (
             <div className="space-y-3">
