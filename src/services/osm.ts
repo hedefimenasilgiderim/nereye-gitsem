@@ -21,8 +21,9 @@ import { fetchJSON, qs } from "./http";
 // Vercel serverless proxy'si 10 sn limitine takıldığı için kaldırıldı;
 // Overpass sunucuları CORS'a açıktır ve tarayıcıdan çalışır.
 const DIRECT_MIRRORS = [
-  "https://overpass-api.de/api/interpreter",
+  // kumi önce: 406/500 oranları düşük; WAF'a en az takılan mirror.
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
   "https://overpass.osm.jp/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
@@ -63,10 +64,10 @@ async function fetchMirror(
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      },
+      // WAF-proof: sadece zorunlu header. Accept/User-Agent gibi
+      // içerik uzlaşma başlıkları 406'ya yol açabildiği için gönderilmez;
+      // tarayıcı kendi varsayılanlarını kullanır.
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "data=" + encodeURIComponent(query),
       signal: controller.signal,
     });
@@ -379,10 +380,14 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
     return { places: value, stale };
   } catch {
     // Crash Guard: tüm mirror'lar başarısız/yavaş olsa bile uygulama
-    // hata ekranı basmaz; gerçek popüler noktalardan oluşan acil durum
-    // verisi gösterilir (banner ile "çevrimdışı veri" belirtilir).
+    // hata ekranı basmaz. Acil durum verisi merkeze göre 20 km ile
+    // sınırlıdır — uzak şehirlerin mekanları asla gösterilmez.
     const fallback = sortFallbackByDistance(
-      filterFallbackPlaces({ categoryIds: opts.categoryIds, limit }),
+      filterFallbackPlaces({
+        center,
+        categoryIds: opts.categoryIds,
+        limit,
+      }),
       center,
       haversineMeters,
     );

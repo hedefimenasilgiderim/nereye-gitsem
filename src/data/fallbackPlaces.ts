@@ -46,6 +46,30 @@ export const FALLBACK_PLACES: Place[] = [
     tags: {},
   },
   {
+    placeId: "local:saatci-ali-efendi-konagi",
+    name: "Saatçi Ali Efendi Konağı",
+    latitude: 40.7654,
+    longitude: 29.9406,
+    categoryId: "historic",
+    city: "Kocaeli",
+    district: "İzmit",
+    description: "19. yüzyıldan kalma, restore edilmiş tarihî konak.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:karamursel-sahili",
+    name: "Karamürsel Sahili",
+    latitude: 40.6894,
+    longitude: 29.6169,
+    categoryId: "nature",
+    city: "Kocaeli",
+    district: "Karamürsel",
+    description: "İzmit Körfezi'nin güney kıyısında deniz kenarı yürüyüş alanı.",
+    images: [],
+    tags: {},
+  },
+  {
     placeId: "local:gulhane-parki",
     name: "Gülhane Parkı",
     latitude: 41.0166,
@@ -204,11 +228,37 @@ export const FALLBACK_PLACES: Place[] = [
 ];
 
 /**
- * Acil durum listesini kategoriye göre filtreler. Seçili kategorilerde
- * hiç kayıt yoksa genel listeye geri döner — kullanıcıya asla boş ekran
- * gösterilmez.
+ * Acil durum verisi için mesafe sınırı: seçilen merkezden daha uzaktaki
+ * (örn. başka şehirdeki) mekanlar ASLA gösterilmez.
+ */
+export const MAX_FALLBACK_DISTANCE_M = 20000;
+
+/** Küçük haversine (osm.ts ile döngüsel import yaratmamak için burada). */
+function haversine(
+  a: Coordinates,
+  b: { lat: number; lon: number },
+): number {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const la1 = (a.lat * Math.PI) / 180;
+  const la2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Acil durum listesini filtreler:
+ * - Seçili kategorilerde kayıt yoksa genel listeye döner.
+ * - Merkez verilirse yalnızca 20 km içindeki mekanlar kalır; uzak
+ *   şehirlerin (örn. İstanbul) mekanları başka il/ilçede asla görünmez.
+ * - Mesafe filtresi sonrası hiç kayıt kalmazsa BOŞ liste döner —
+ *   uzağa ait veri basmak yerine boşluk göstermek doğrudur.
  */
 export function filterFallbackPlaces(opts: {
+  center?: Coordinates;
   categoryIds?: string[];
   limit?: number;
 }): Place[] {
@@ -217,6 +267,13 @@ export function filterFallbackPlaces(opts: {
   if (opts.categoryIds?.length) {
     const filtered = list.filter((p) => opts.categoryIds!.includes(p.categoryId));
     if (filtered.length > 0) list = filtered;
+  }
+  if (opts.center) {
+    list = list.filter(
+      (p) =>
+        haversine(opts.center!, { lat: p.latitude, lon: p.longitude }) <=
+        MAX_FALLBACK_DISTANCE_M,
+    );
   }
   return list.slice(0, limit);
 }
