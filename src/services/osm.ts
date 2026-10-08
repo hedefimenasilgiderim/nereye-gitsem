@@ -13,10 +13,9 @@ import { CATEGORIES } from "../data/categories";
 import { cached } from "./cache";
 import { ApiError, fetchJSON, qs } from "./http";
 
-const OVERPASS_ENDPOINTS = [
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass-api.de/api/interpreter",
-];
+// Tüm Overpass trafiği Vercel proxy üzerinden geçer (tarayıcı WAF
+// engeline takılmamak için). Proxy, overpass-api.de + kumi fallback yapar.
+const OVERPASS_PROXY = "/api/overpass";
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 
@@ -46,23 +45,17 @@ async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   const query = normalized.includes("[timeout:10]")
     ? normalized
     : normalized.replace("[out:json]", "[out:json][timeout:10]");
-  let lastError: unknown;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const res = await fetchJSON<OverpassResponse>(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "data=" + encodeURIComponent(query),
-        timeoutMs: 30000,
-      });
-      return res.elements ?? [];
-    } catch (err) {
-      lastError = err;
-    }
+  try {
+    const res = await fetchJSON<OverpassResponse>(OVERPASS_PROXY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+      timeoutMs: 30000,
+    });
+    return res.elements ?? [];
+  } catch (err) {
+    throw err instanceof Error ? err : new ApiError("Overpass erişilemedi");
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiError("Overpass erişilemedi");
 }
 
 // ------------------------------------------------------- Kategori eşleme
