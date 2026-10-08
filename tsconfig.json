@@ -15,7 +15,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client", "@vercel/node"]
+    "types": ["vite/client"]
   },
-  "include": ["src", "api", "vite.config.ts", "capacitor.config.ts"]
+  "include": ["src", "vite.config.ts", "capacitor.config.ts"]
 }

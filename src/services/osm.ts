@@ -10,12 +10,27 @@
 
 import type { Coordinates, Place, PlaceRef } from "../models/types";
 import { CATEGORIES } from "../data/categories";
+import {
+  filterFallbackPlaces,
+  sortFallbackByDistance,
+} from "../data/fallbackPlaces";
 import { cached, cachedWithStale } from "./cache";
 import { fetchJSON, qs } from "./http";
 
-// Tüm Overpass trafiği Vercel proxy üzerinden geçer (tarayıcı WAF
-// engeline takılmamak için). Proxy, overpass-api.de + kumi fallback yapar.
-const OVERPASS_PROXY = "/api/overpass";
+// Overpass istekleri tarayıcıdan DOĞRUDAN kamu mirror'larına gider.
+// Vercel serverless proxy'si 10 sn limitine takıldığı için kaldırıldı;
+// Overpass sunucuları CORS'a açıktır ve tarayıcıdan çalışır.
+const DIRECT_MIRRORS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+  "https://overpass.osm.jp/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+];
+
+const RACE_MIRROR_COUNT = 3; // ilk 3 mirror'a paralel istek
+const RACE_TIMEOUT_MS = 3000; // paralel turda mirror başına sert sınır
+const SEQUENTIAL_TIMEOUT_MS = 4000; // kalan mirror'lar için sınır
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 
@@ -38,6 +53,52 @@ interface OverpassResponse {
   elements: OverpassElement[];
 }
 
+async function fetchMirror(
+  url: string,
+  query: string,
+  timeoutMs: number,
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: "data=" + encodeURIComponent(query),
+      signal: controller.signal,
+    });
+    // Overpass yoğunlukta XML/HTML hata sayfası döndürebilir; text okuyup
+    // parse etmeyi dene (JSON dışı yanıt patlamasın).
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    JSON.parse(text);
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** İlk başarılı promise'i bekler (Promise.any ES2021 olduğu için elle yazıldı). */
+function firstSuccess(tasks: Promise<string>[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let failed = 0;
+    if (tasks.length === 0) {
+      reject(new Error("no mirrors"));
+      return;
+    }
+    for (const task of tasks) {
+      task.then(resolve, () => {
+        if (++failed === tasks.length) {
+          reject(new Error("all race mirrors failed"));
+        }
+      });
+    }
+  });
+}
+
 async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   const normalized = ql.trimStart().startsWith("[out:json]")
     ? ql.replace(/\[timeout:\d+\]/, "[timeout:5]")
@@ -45,13 +106,27 @@ async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   const query = normalized.includes("[timeout:5]")
     ? normalized
     : normalized.replace("[out:json]", "[out:json][timeout:5]");
-  const res = await fetchJSON<OverpassResponse>(OVERPASS_PROXY, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
-    timeoutMs: 12000, // proxy 8 sn bütçesinde çalışır; pay için 12 sn
-  });
-  return res.elements ?? [];
+
+  // Hızlı tur: ilk 3 mirror'a aynı anda istek; en hızlı 200 dönen kazanır.
+  try {
+    const body = await firstSuccess(
+      DIRECT_MIRRORS.slice(0, RACE_MIRROR_COUNT).map((url) =>
+        fetchMirror(url, query, RACE_TIMEOUT_MS),
+      ),
+    );
+    return (JSON.parse(body) as OverpassResponse).elements ?? [];
+  } catch {
+    // Paralel tur başarısız: kalan mirror'lar sırayla denenir.
+    for (const url of DIRECT_MIRRORS.slice(RACE_MIRROR_COUNT)) {
+      try {
+        const body = await fetchMirror(url, query, SEQUENTIAL_TIMEOUT_MS);
+        return (JSON.parse(body) as OverpassResponse).elements ?? [];
+      } catch {
+        /* sonraki mirror */
+      }
+    }
+    throw new Error("Tüm Overpass mirror'ları başarısız");
+  }
 }
 
 // ------------------------------------------------------- Kategori eşleme
@@ -258,49 +333,61 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
     (opts.categoryIds ?? []).join(",") || "all"
   }:${limit}`;
 
-  const { value, stale } = await cachedWithStale(key, TTL_NEARBY, async () => {
-    let elements = await queryOverpass(ql);
+  try {
+    const { value, stale } = await cachedWithStale(key, TTL_NEARBY, async () => {
+      let elements = await queryOverpass(ql);
 
-    // 5 km boş döndüyse aynı sorguyu 15 km ile tek seferlik tekrar dene.
-    if (elements.length === 0) {
-      const wideQl = buildAroundQuery({
-        center,
-        radius: 15000,
-        categoryIds: opts.categoryIds,
-        limit,
-      });
-      if (wideQl) elements = await queryOverpass(wideQl);
-    }
-
-    const seen = new Set<string>();
-    const places: Place[] = [];
-    const collect = (els: OverpassElement[]) => {
-      for (const el of els) {
-        const place = elementToPlace(el, center);
-        if (!place || seen.has(place.placeId)) continue;
-        seen.add(place.placeId);
-        places.push(place);
+      // 5 km boş döndüyse aynı sorguyu 15 km ile tek seferlik tekrar dene.
+      if (elements.length === 0) {
+        const wideQl = buildAroundQuery({
+          center,
+          radius: 15000,
+          categoryIds: opts.categoryIds,
+          limit,
+        });
+        if (wideQl) elements = await queryOverpass(wideQl);
       }
-    };
-    collect(elements);
 
-    // Seçili kategori 0 sonuç döndürse bile kullanıcıya "Sonuç bulunamadı"
-    // yerine yakındaki genel popüler noktalar gösterilir.
-    if (places.length === 0 && opts.categoryIds?.length) {
-      const popQl = buildAroundQuery({
-        center,
-        radius: 15000,
-        categoryIds: POPULAR_FALLBACK_IDS,
-        limit,
-      });
-      if (popQl) collect(await queryOverpass(popQl));
-    }
+      const seen = new Set<string>();
+      const places: Place[] = [];
+      const collect = (els: OverpassElement[]) => {
+        for (const el of els) {
+          const place = elementToPlace(el, center);
+          if (!place || seen.has(place.placeId)) continue;
+          seen.add(place.placeId);
+          places.push(place);
+        }
+      };
+      collect(elements);
 
-    places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
-    return places;
-  });
+      // Seçili kategori 0 sonuç döndürse bile kullanıcıya "Sonuç bulunamadı"
+      // yerine yakındaki genel popüler noktalar gösterilir.
+      if (places.length === 0 && opts.categoryIds?.length) {
+        const popQl = buildAroundQuery({
+          center,
+          radius: 15000,
+          categoryIds: POPULAR_FALLBACK_IDS,
+          limit,
+        });
+        if (popQl) collect(await queryOverpass(popQl));
+      }
 
-  return { places: value, stale };
+      places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+      return places;
+    });
+
+    return { places: value, stale };
+  } catch {
+    // Crash Guard: tüm mirror'lar başarısız/yavaş olsa bile uygulama
+    // hata ekranı basmaz; gerçek popüler noktalardan oluşan acil durum
+    // verisi gösterilir (banner ile "çevrimdışı veri" belirtilir).
+    const fallback = sortFallbackByDistance(
+      filterFallbackPlaces({ categoryIds: opts.categoryIds, limit }),
+      center,
+      haversineMeters,
+    );
+    return { places: fallback, stale: true };
+  }
 }
 
 // ------------------------------------------------------------ Nominatim
