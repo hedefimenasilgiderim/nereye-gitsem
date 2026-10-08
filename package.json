@@ -1,7 +1,7 @@
 {
   "name": "nereye-gitsem",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.3.2",
   "description": "NEREYE GİTSEM? - Çevrendeki yerleri keşfet, kaydet ve rotana dönüştür",
   "type": "module",
   "scripts": {

@@ -70,6 +70,54 @@ export const FALLBACK_PLACES: Place[] = [
     tags: {},
   },
   {
+    placeId: "local:kocaeli-muzesi",
+    name: "Kocaeli Müzesi",
+    latitude: 40.7646,
+    longitude: 29.9416,
+    categoryId: "historic",
+    city: "Kocaeli",
+    district: "İzmit",
+    description: "Arkeolojik ve etnografik eserlerin sergilendiği il müzesi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:izmit-saat-kulesi",
+    name: "İzmit Saat Kulesi",
+    latitude: 40.7648,
+    longitude: 29.9164,
+    categoryId: "attraction",
+    city: "Kocaeli",
+    district: "İzmit",
+    description: "1902 tarihli, şehrin simgelerinden olan tarihi saat kulesi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:kerpe-sahili",
+    name: "Kerpe Sahili",
+    latitude: 41.1719,
+    longitude: 30.1797,
+    categoryId: "beach",
+    city: "Kocaeli",
+    district: "Kandıra",
+    description: "Kayalıkları ve sığ sularıyla bilinen Kandıra sahil kasabası.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:seka-erenler-tepesi",
+    name: "Seka Erenler Tepesi",
+    latitude: 40.7605,
+    longitude: 29.9022,
+    categoryId: "photo",
+    city: "Kocaeli",
+    district: "İzmit",
+    description: "İzmit Körfezi'ne bakan mesire ve manzara noktası.",
+    images: [],
+    tags: {},
+  },
+  {
     placeId: "local:gulhane-parki",
     name: "Gülhane Parkı",
     latitude: 41.0166,
@@ -417,13 +465,46 @@ function haversine(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+/** Kullanıcıya en az bu kadar kaliteli mekan gösterilir (asla boş ekran yok). */
+const MIN_RESULTS = 6;
+
 /**
- * Acil durum listesini KESİN kategori filtresiyle süzer:
- * - Yalnızca seçili kategorilere ait mekanlar döner — başka kategorinin
- *   mekanları asla karıştırılmaz (örn. Alışveriş'te park çıkmaz).
- * - Merkez verilirse yalnızca 20 km içindeki mekanlar kalır; uzak
- *   şehirlerin (örn. İstanbul) mekanları başka il/ilçede asla görünmez.
- * - Filtre sonrası hiç kayıt kalmazsa BOŞ liste döner.
+ * Merkezin bulunduğu ili tahmin eder: en yakın acil durum kaydının şehri.
+ * Böylece "il genelinden öneri" mantığı harita bilgisi olmadan çalışır.
+ */
+function inferProvince(center: Coordinates): string | null {
+  let best: { city: string; d: number } | null = null;
+  for (const p of FALLBACK_PLACES) {
+    const d = haversine(center, { lat: p.latitude, lon: p.longitude });
+    const city = p.city ?? null;
+    if (!city) continue;
+    if (!best || d < best.d) best = { city, d };
+  }
+  return best?.city ?? null;
+}
+
+function dedupeByPlaceId(places: Place[]): Place[] {
+  const seen = new Set<string>();
+  return places.filter((p) => {
+    if (seen.has(p.placeId)) return false;
+    seen.add(p.placeId);
+    return true;
+  });
+}
+
+/**
+ * Kademeli acil durum filtresi — kullanıcıya ASLA boş ekran gösterilmez:
+ *
+ * 1. KATI: seçili kategori + 20 km mesafe sınırı (Başiskele'de İstanbul
+ *    mekanı görünmez).
+ * 2. İL GENELİ: katı sonuç 6'dan azsa, merkezin ili tahmin edilir ve o
+ *    ildeki aynı kategoriye ait tüm kayıtlar eklenir (örn. Başiskele →
+ *    Kocaeli geneli: Gebze Center, Seka Park...).
+ * 3. EN YAKIN KATEGORİ: hâlâ 6'dan azsa, aynı kategorinin merkeze en
+ *    yakın kayıtları (başka ilden olsa bile) listeye eklenir.
+ *
+ * Kategori filtresi her kademede KESİN uygulanır — başka kategorinin
+ * mekanları asla karıştırılmaz.
  */
 export function filterFallbackPlaces(opts: {
   center?: Coordinates;
@@ -431,18 +512,43 @@ export function filterFallbackPlaces(opts: {
   limit?: number;
 }): Place[] {
   const limit = opts.limit ?? 20;
-  let list = FALLBACK_PLACES;
-  if (opts.categoryIds?.length) {
-    list = list.filter((p) => opts.categoryIds!.includes(p.categoryId));
-  }
-  if (opts.center) {
-    list = list.filter(
-      (p) =>
-        haversine(opts.center!, { lat: p.latitude, lon: p.longitude }) <=
-        MAX_FALLBACK_DISTANCE_M,
+  const byCategory = (list: Place[]) =>
+    opts.categoryIds?.length
+      ? list.filter((p) => opts.categoryIds!.includes(p.categoryId))
+      : list;
+
+  // 1. Katı: kategori + 20 km.
+  let result = FALLBACK_PLACES.filter(
+    (p) =>
+      haversine(opts.center ?? { lat: 0, lon: 0 }, {
+        lat: p.latitude,
+        lon: p.longitude,
+      }) <= MAX_FALLBACK_DISTANCE_M,
+  );
+  if (!opts.center) result = FALLBACK_PLACES;
+  result = byCategory(result);
+  if (result.length >= MIN_RESULTS) return result.slice(0, limit);
+
+  if (!opts.center) return result.slice(0, limit);
+
+  // 2. İl geneli: aynı ildeki aynı kategori kayıtları.
+  const province = inferProvince(opts.center);
+  if (province) {
+    const provList = byCategory(
+      FALLBACK_PLACES.filter((p) => p.city === province),
     );
+    result = dedupeByPlaceId([...result, ...provList]);
+    if (result.length >= MIN_RESULTS) return result.slice(0, limit);
   }
-  return list.slice(0, limit);
+
+  // 3. En yakın kategori kayıtları: mesafe sırasıyla tamamlanır.
+  const anyList = byCategory(FALLBACK_PLACES).slice().sort(
+    (a, b) =>
+      haversine(opts.center!, { lat: a.latitude, lon: a.longitude }) -
+      haversine(opts.center!, { lat: b.latitude, lon: b.longitude }),
+  );
+  result = dedupeByPlaceId([...result, ...anyList]);
+  return result.slice(0, limit);
 }
 
 /** Kullanıcı konumuna göre acil durum listesini mesafeye göre sıralar. */

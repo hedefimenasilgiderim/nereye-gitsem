@@ -69,10 +69,22 @@ export const CATEGORIES: CategoryDef[] = [
     label: "Etkinlik",
     emoji: "🎭",
     color: "#7c3aed",
-    // Etkinlikler için güvenilir, sürekli bir açık veri kaynağı V1'de yok.
-    // Uydurma etkinlik üretmek yasaktır; kategori modelde mevcut, veri
-    // kaynağı ileride ayrı bir etkinlik servisiyle bağlanacaktır.
-    tagFilters: [],
+    // Etkinlik mekânları: kültür merkezi, tiyatro, sinema, konser/gösteri
+    // alanı, sahil ve etkinlik parkları. Uydurma etkinlik üretmek yok;
+    // gerçek OSM mekânları gösterilir.
+    tagFilters: [
+      {
+        amenity: [
+          "events_venue",
+          "community_centre",
+          "cinema",
+          "theatre",
+          "concert_hall",
+          "arts_centre",
+        ],
+      },
+      { leisure: ["water_park", "amusement_arcade"] },
+    ],
   },
   {
     id: "shopping",
@@ -109,7 +121,13 @@ export const CATEGORIES: CategoryDef[] = [
     label: "Fotoğraf Noktaları",
     emoji: "📸",
     color: "#c026d3",
-    tagFilters: [{ tourism: ["viewpoint"] }],
+    // Manzara seyir terasları, tarihi yapılar, anıtlar, sahil ve otantik
+    // noktalar.
+    tagFilters: [
+      { tourism: ["viewpoint", "artwork"] },
+      { historic: ["monument", "memorial", "castle", "ruins"] },
+      { natural: ["beach"] },
+    ],
   },
 ];
 
