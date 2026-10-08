@@ -13,11 +13,7 @@ import { CATEGORIES } from "../data/categories";
 import { cached } from "./cache";
 import { ApiError, fetchJSON, qs } from "./http";
 
-const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
-];
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 
@@ -41,22 +37,22 @@ interface OverpassResponse {
 }
 
 async function queryOverpass(ql: string): Promise<OverpassElement[]> {
-  let lastError: unknown;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const res = await fetchJSON<OverpassResponse>(endpoint, {
-        method: "POST",
-        body: "data=" + encodeURIComponent(ql),
-        timeoutMs: 30000,
-      });
-      return res.elements ?? [];
-    } catch (err) {
-      lastError = err;
-    }
+  // Sorgu her zaman JSON çıktı ister; Content-Type form-urlencoded olmalı.
+  // Not: ekstra başlık gönderilmiyor (406 önlemi).
+  const query = ql.trimStart().startsWith("[out:json]")
+    ? ql
+    : `[out:json];\n${ql}`;
+  try {
+    const res = await fetchJSON<OverpassResponse>(OVERPASS_URL, {
+      method: "POST",
+      body: "data=" + encodeURIComponent(query),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeoutMs: 30000,
+    });
+    return res.elements ?? [];
+  } catch (err) {
+    throw err instanceof Error ? err : new ApiError("Overpass erişilemedi");
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiError("Overpass erişilemedi");
 }
 
 // ------------------------------------------------------- Kategori eşleme

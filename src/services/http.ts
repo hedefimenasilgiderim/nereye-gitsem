@@ -27,7 +27,12 @@ export function isOffline(): boolean {
 
 export async function fetchJSON<T>(
   url: string,
-  opts: { timeoutMs?: number; method?: string; body?: string } = {},
+  opts: {
+    timeoutMs?: number;
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<T> {
   if (isOffline()) throw new OfflineError();
 
@@ -42,11 +47,13 @@ export async function fetchJSON<T>(
       method: opts.method ?? "GET",
       body: opts.body,
       signal: controller.signal,
+      // Not: ekstra başlık gönderilmiyor (Overpass 406 önlemi).
+      // POST gövdelerinde varsayılan Content-Type form-urlencoded'dur.
       headers: {
-        Accept: "application/json",
         ...(opts.body
           ? { "Content-Type": "application/x-www-form-urlencoded" }
           : {}),
+        ...(opts.headers ?? {}),
       },
     });
     if (!res.ok) {
