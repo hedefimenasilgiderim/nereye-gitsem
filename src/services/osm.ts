@@ -13,7 +13,10 @@ import { CATEGORIES } from "../data/categories";
 import { cached } from "./cache";
 import { ApiError, fetchJSON, qs } from "./http";
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+];
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 
@@ -43,20 +46,22 @@ async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   const query = normalized.includes("[timeout:15]")
     ? normalized
     : normalized.replace("[out:json]", "[out:json][timeout:15]");
-  try {
-    const res = await fetchJSON<OverpassResponse>(OVERPASS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "nereye-gitsem/1.0",
-      },
-      body: "data=" + encodeURIComponent(query),
-      timeoutMs: 30000,
-    });
-    return res.elements ?? [];
-  } catch (err) {
-    throw err instanceof Error ? err : new ApiError("Overpass erişilemedi");
+  let lastError: unknown;
+  for (const base of OVERPASS_ENDPOINTS) {
+    try {
+      const url = `${base}?data=${encodeURIComponent(query)}`;
+      const res = await fetchJSON<OverpassResponse>(url, {
+        method: "GET",
+        timeoutMs: 30000,
+      });
+      return res.elements ?? [];
+    } catch (err) {
+      lastError = err;
+    }
   }
+  throw lastError instanceof Error
+    ? lastError
+    : new ApiError("Overpass erişilemedi");
 }
 
 // ------------------------------------------------------- Kategori eşleme

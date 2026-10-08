@@ -27,12 +27,7 @@ export function isOffline(): boolean {
 
 export async function fetchJSON<T>(
   url: string,
-  opts: {
-    timeoutMs?: number;
-    method?: string;
-    body?: string;
-    headers?: Record<string, string>;
-  } = {},
+  opts: { timeoutMs?: number; method?: string; body?: string } = {},
 ): Promise<T> {
   if (isOffline()) throw new OfflineError();
 
@@ -47,7 +42,6 @@ export async function fetchJSON<T>(
       method: opts.method ?? "GET",
       body: opts.body,
       signal: controller.signal,
-      headers: opts.headers,
     });
     if (!res.ok) {
       throw new ApiError(
