@@ -13,10 +13,7 @@ import { CATEGORIES } from "../data/categories";
 import { cached } from "./cache";
 import { ApiError, fetchJSON, qs } from "./http";
 
-const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-];
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 
@@ -40,25 +37,26 @@ interface OverpassResponse {
 }
 
 async function queryOverpass(ql: string): Promise<OverpassElement[]> {
-  const query = ql.trimStart().startsWith("[out:json]")
-    ? ql
-    : `[out:json];\n${ql}`;
-  let lastError: unknown;
-  for (const base of OVERPASS_ENDPOINTS) {
-    try {
-      const url = `${base}?data=${encodeURIComponent(query)}`;
-      const res = await fetchJSON<OverpassResponse>(url, {
-        method: "GET",
-        timeoutMs: 30000,
-      });
-      return res.elements ?? [];
-    } catch (err) {
-      lastError = err;
-    }
+  const normalized = ql.trimStart().startsWith("[out:json]")
+    ? ql.replace(/\[timeout:\d+\]/, "[timeout:15]")
+    : `[out:json][timeout:15];\n${ql}`;
+  const query = normalized.includes("[timeout:15]")
+    ? normalized
+    : normalized.replace("[out:json]", "[out:json][timeout:15]");
+  try {
+    const res = await fetchJSON<OverpassResponse>(OVERPASS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "nereye-gitsem/1.0",
+      },
+      body: "data=" + encodeURIComponent(query),
+      timeoutMs: 30000,
+    });
+    return res.elements ?? [];
+  } catch (err) {
+    throw err instanceof Error ? err : new ApiError("Overpass erişilemedi");
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiError("Overpass erişilemedi");
 }
 
 // ------------------------------------------------------- Kategori eşleme
@@ -213,7 +211,7 @@ function buildAroundQuery(opts: {
   }
 
   if (lines.length === 0) return null;
-  return `[out:json][timeout:25];\n(\n${lines.join("\n")}\n);\nout center ${opts.limit};`;
+  return `[out:json][timeout:15];\n(\n${lines.join("\n")}\n);\nout center ${opts.limit};`;
 }
 
 export interface NearbyOptions {
@@ -437,7 +435,7 @@ export async function getPlaceDetail(
       R: "relation",
     };
     const osmType = typeMap[ref.osmType];
-    const ql = `[out:json][timeout:20];\n${osmType}(id:${ref.osmId});\nout center;`;
+    const ql = `[out:json][timeout:15];\n${osmType}(id:${ref.osmId});\nout center 20;`;
     try {
       const elements = await queryOverpass(ql);
       const el = elements.find(
