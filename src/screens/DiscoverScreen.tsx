@@ -62,6 +62,9 @@ export function DiscoverScreen() {
       radius,
       categoryIds: activeFilter?.categoryIds,
       limit: activeFilter ? 60 : 40,
+      cityKey: location.status === "granted"
+        ? location.city ?? selectedCity ?? undefined
+        : selectedCity ?? undefined,
     })
       .then((result) => {
         if (cancelled) return;

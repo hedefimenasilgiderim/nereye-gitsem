@@ -17,6 +17,15 @@ import {
 import { cached, cachedWithStale } from "./cache";
 import { fetchJSON, qs } from "./http";
 
+// Firestore cache modülü LAZY yüklenir: Firebase SDK'sı ana paket şişmesin
+// diye yalnızca ilk getNearbyPlaces çağrısında indirilir.
+type FirebaseCache = typeof import("./firebase");
+let fbPromise: Promise<FirebaseCache> | null = null;
+function loadFirebaseCache(): Promise<FirebaseCache> {
+  fbPromise ??= import("./firebase");
+  return fbPromise;
+}
+
 // Overpass istekleri tarayıcıdan TEK bir güvenilir primary sunucuya gider.
 // Paralel mirror yarışı kaldırıldı: 5-6 eşzamanlı istek ağı kilitleyip
 // 406/500/504 yağmuruna yol açıyordu. 2,5 sn'de yanıt gelmezse istek iptal
@@ -26,7 +35,6 @@ const PRIMARY_TIMEOUT_MS = 2500;
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 
-const TTL_NEARBY = 10 * 60 * 1000; // 10 dk
 const TTL_SEARCH = 10 * 60 * 1000; // 10 dk
 const TTL_DETAIL = 60 * 60 * 1000; // 1 saat
 
@@ -242,6 +250,12 @@ export interface NearbyOptions {
   radius?: number;
   categoryIds?: string[];
   limit?: number;
+  /**
+   * Şehir/ilçe anahtarı (örn. "Başiskele"): Firestore `places_cache`
+   * doc kimliği `{sehir}_{kategori}` bununla üretilir. Verilmezse
+   * koordinat bazlı anahtar kullanılır.
+   */
+  cityKey?: string;
 }
 
 /**
@@ -270,16 +284,17 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
     if (cats.every((c) => c.tagFilters.length === 0)) throw new NoSourceError();
   }
 
-  const ql = buildAroundQuery({ center, radius, categoryIds: opts.categoryIds, limit });
-  if (!ql) throw new NoSourceError();
+  // Firestore doc kimliği: {sehir}_{kategori} (örn. basiskele_kafe).
+  const categoryId =
+    opts.categoryIds?.length && opts.categoryIds.length > 0
+      ? opts.categoryIds.slice().sort().join("+")
+      : "all";
+  const cityKey =
+    opts.cityKey ??
+    `geo_${center.lat.toFixed(2)}_${center.lon.toFixed(2)}`;
 
-  const key = `nearby:${center.lat.toFixed(3)},${center.lon.toFixed(3)}:${radius}:${
-    (opts.categoryIds ?? []).join(",") || "all"
-  }:${limit}`;
-
-  // Yerel kategorik veri: ağ başarısız/boş olduğunda SESSİZCE devreye girer.
-  // Kesin kategori filtresi uygulanır — başka kategorinin mekanları
-  // asla karıştırılmaz.
+  // Yerel kategorik veri: Overpass patlarsa/boş dönerse SESSİZCE devreye
+  // girer. Kesin kategori filtresi — başka kategori asla karıştırılmaz.
   const localPlaces = () =>
     sortFallbackByDistance(
       filterFallbackPlaces({ center, categoryIds: opts.categoryIds, limit }),
@@ -287,28 +302,71 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
       haversineMeters,
     );
 
+  // Cache-first: Firestore'da veri varsa Overpass'e HİÇBİR istek atılmaz.
+  let docId: string | null = null;
   try {
-    const { value } = await cachedWithStale(key, TTL_NEARBY, async () => {
-      const elements = await queryOverpass(ql);
-
-      const seen = new Set<string>();
-      const places: Place[] = [];
-      for (const el of elements) {
-        const place = elementToPlace(el, center);
-        if (!place || seen.has(place.placeId)) continue;
-        seen.add(place.placeId);
-        places.push(place);
-      }
-      places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
-      return places;
-    });
-
-    // Ağ çalıştı ama kayıt dönmedi: yerel kategorik veri gösterilir.
-    if (value.length === 0) return { places: localPlaces() };
-    return { places: value };
+    const fb = await loadFirebaseCache();
+    docId = fb.placeCacheDocId(cityKey, categoryId);
+    const cachedPlaces = await fb.readPlaceCache(docId);
+    if (cachedPlaces && cachedPlaces.length > 0) {
+      return {
+        places: sortFallbackByDistance(cachedPlaces, center, haversineMeters),
+      };
+    }
   } catch {
-    // Ağ patladı / zaman aşımı: hata ekranı YOK. Yerel kategorik veri.
-    return { places: localPlaces() };
+    /* Firebase yok/erişilemez: Overpass → yerel veri akışıyla devam */
+  }
+
+  const ql = buildAroundQuery({ center, radius, categoryIds: opts.categoryIds, limit });
+  if (!ql) throw new NoSourceError();
+
+  try {
+    // Cache miss: Overpass'e SADECE TEK istek atılır.
+    const elements = await queryOverpass(ql);
+    const seen = new Set<string>();
+    const places: Place[] = [];
+    for (const el of elements) {
+      const place = elementToPlace(el, center);
+      if (!place || seen.has(place.placeId)) continue;
+      seen.add(place.placeId);
+      places.push(place);
+    }
+
+    if (places.length === 0) {
+      // Ağ çalıştı ama kayıt dönmedi: yerel kategorik veri gösterilir ve
+      // kısa TTL ile önbelleğe yazılır (gerçek veri sonra üzerine yazar).
+      const local = localPlaces();
+      if (docId) {
+        void loadFirebaseCache()
+          .then((fb) =>
+            fb.writePlaceCache(docId!, local, "fallback", fb.FALLBACK_CACHE_TTL_MS),
+          )
+          .catch(() => {});
+      }
+      return { places: local };
+    }
+
+    // Read-through: sonuçlar Firestore'a yazılır; sonraki kullanıcılar
+    // bu veriyi milisaniyeler içinde alır.
+    places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+    if (docId) {
+      void loadFirebaseCache()
+        .then((fb) => fb.writePlaceCache(docId!, places, "overpass"))
+        .catch(() => {});
+    }
+    return { places };
+  } catch {
+    // Overpass patladı / 2,5 sn zaman aşımı: hata ekranı YOK. Yerel
+    // kategorik veri hem ekrana basılır hem önbelleğe yazılır.
+    const local = localPlaces();
+    if (docId) {
+      void loadFirebaseCache()
+        .then((fb) =>
+          fb.writePlaceCache(docId!, local, "fallback", fb.FALLBACK_CACHE_TTL_MS),
+        )
+        .catch(() => {});
+    }
+    return { places: local };
   }
 }
 

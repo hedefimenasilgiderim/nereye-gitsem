@@ -37,7 +37,14 @@ export function MapScreen() {
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
-    getNearbyPlaces({ center, radius: 8000, limit: 120 })
+    getNearbyPlaces({
+      center,
+      radius: 8000,
+      limit: 120,
+      cityKey: location.status === "granted"
+        ? location.city ?? selectedCity ?? undefined
+        : selectedCity ?? undefined,
+    })
       .then((result) => {
         if (cancelled) return;
         setPlaces(result.places);
