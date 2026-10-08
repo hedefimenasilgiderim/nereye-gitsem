@@ -14,8 +14,8 @@ import { cached } from "./cache";
 import { ApiError, fetchJSON, qs } from "./http";
 
 const OVERPASS_ENDPOINTS = [
+  "https://overpass.kumi.systems/api/interpreter",
   "https://overpass-api.de/api/interpreter",
-  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
@@ -41,17 +41,18 @@ interface OverpassResponse {
 
 async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   const normalized = ql.trimStart().startsWith("[out:json]")
-    ? ql.replace(/\[timeout:\d+\]/, "[timeout:15]")
-    : `[out:json][timeout:15];\n${ql}`;
-  const query = normalized.includes("[timeout:15]")
+    ? ql.replace(/\[timeout:\d+\]/, "[timeout:10]")
+    : `[out:json][timeout:10];\n${ql}`;
+  const query = normalized.includes("[timeout:10]")
     ? normalized
-    : normalized.replace("[out:json]", "[out:json][timeout:15]");
+    : normalized.replace("[out:json]", "[out:json][timeout:10]");
   let lastError: unknown;
-  for (const base of OVERPASS_ENDPOINTS) {
+  for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      const url = `${base}?data=${encodeURIComponent(query)}`;
-      const res = await fetchJSON<OverpassResponse>(url, {
-        method: "GET",
+      const res = await fetchJSON<OverpassResponse>(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "data=" + encodeURIComponent(query),
         timeoutMs: 30000,
       });
       return res.elements ?? [];
@@ -193,7 +194,10 @@ function buildAroundQuery(opts: {
     ? CATEGORIES.filter((c) => opts.categoryIds!.includes(c.id))
     : CATEGORIES;
   const lines: string[] = [];
-  const around = `(around:${Math.round(opts.radius)},${opts.center.lat},${opts.center.lon})`;
+  // WAF/timeout koruması: yarıçap en fazla 5 km; büyük aramalarda sonuç
+  // boyutu küçültülür.
+  const cappedRadius = Math.min(Math.round(opts.radius), 5000);
+  const around = `(around:${cappedRadius},${opts.center.lat},${opts.center.lon})`;
 
   for (const cat of cats) {
     for (const filter of cat.tagFilters) {
@@ -216,7 +220,8 @@ function buildAroundQuery(opts: {
   }
 
   if (lines.length === 0) return null;
-  return `[out:json][timeout:15];\n(\n${lines.join("\n")}\n);\nout center ${opts.limit};`;
+  const limit = opts.radius > 5000 ? 15 : opts.limit;
+  return `[out:json][timeout:10];\n(\n${lines.join("\n")}\n);\nout center ${limit};`;
 }
 
 export interface NearbyOptions {
@@ -440,7 +445,7 @@ export async function getPlaceDetail(
       R: "relation",
     };
     const osmType = typeMap[ref.osmType];
-    const ql = `[out:json][timeout:15];\n${osmType}(id:${ref.osmId});\nout center 20;`;
+    const ql = `[out:json][timeout:10];\n${osmType}(id:${ref.osmId});\nout center 15;`;
     try {
       const elements = await queryOverpass(ql);
       const el = elements.find(
