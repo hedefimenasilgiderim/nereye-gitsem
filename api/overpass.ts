@@ -9,14 +9,13 @@ const MIRRORS = [
   "https://overpass.osm.jp/api/interpreter",
 ];
 
-const MIRROR_TIMEOUT_MS = 8000;
-const RETRY_ROUNDS = 2; // kamu sunucuları aşırı yüklü; aynı sorguya ilk turda
-// 504 dönen overpass-api.de ikinci turda 200 döndü (canlı test, 08.10.2026).
-const TOTAL_BUDGET_MS = 45000; // maxDuration=60 altında kalacak en kötü süre
+const MIRROR_TIMEOUT_MS = 4000; // sert sınır: 4 sn'de cevap yoksa sonraki mirror
+const RETRY_ROUNDS = 1; // bütçe 8 sn'i aşmaması için tek tur; rotasyon yeterli
+const TOTAL_BUDGET_MS = 7500; // Vercel 10 sn limiti + ağ gecikmesi payı
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 200;
 
-export const maxDuration = 60;
+export const maxDuration = 15;
 
 interface CacheEntry {
   body: string;

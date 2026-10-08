@@ -49,7 +49,7 @@ async function queryOverpass(ql: string): Promise<OverpassElement[]> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
-    timeoutMs: 30000,
+    timeoutMs: 12000, // proxy 8 sn bütçesinde çalışır; pay için 12 sn
   });
   return res.elements ?? [];
 }
@@ -183,9 +183,9 @@ function buildAroundQuery(opts: {
     ? CATEGORIES.filter((c) => opts.categoryIds!.includes(c.id))
     : CATEGORIES;
   const lines: string[] = [];
-  // WAF/timeout koruması: yarıçap en fazla 5 km; büyük aramalarda sonuç
-  // boyutu küçültülür.
-  const cappedRadius = Math.min(Math.round(opts.radius), 5000);
+  // WAF/timeout koruması: 5 km ana arama; 0 sonuç durumunda 15 km
+  // fallback'e izin vermek için üst sınır 15 km.
+  const cappedRadius = Math.min(Math.round(opts.radius), 15000);
   const around = `(around:${cappedRadius},${opts.center.lat},${opts.center.lon})`;
 
   for (const cat of cats) {
@@ -251,20 +251,51 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
   const ql = buildAroundQuery({ center, radius, categoryIds: opts.categoryIds, limit });
   if (!ql) throw new NoSourceError();
 
+  // 0 sonuçta genel yarıçap fallback'i: turizm/boş zaman etiketli popüler noktalar.
+  const POPULAR_FALLBACK_IDS = ["attraction", "nature", "family", "photo"];
+
   const key = `nearby:${center.lat.toFixed(3)},${center.lon.toFixed(3)}:${radius}:${
     (opts.categoryIds ?? []).join(",") || "all"
   }:${limit}`;
 
   const { value, stale } = await cachedWithStale(key, TTL_NEARBY, async () => {
-    const elements = await queryOverpass(ql);
+    let elements = await queryOverpass(ql);
+
+    // 5 km boş döndüyse aynı sorguyu 15 km ile tek seferlik tekrar dene.
+    if (elements.length === 0) {
+      const wideQl = buildAroundQuery({
+        center,
+        radius: 15000,
+        categoryIds: opts.categoryIds,
+        limit,
+      });
+      if (wideQl) elements = await queryOverpass(wideQl);
+    }
+
     const seen = new Set<string>();
     const places: Place[] = [];
-    for (const el of elements) {
-      const place = elementToPlace(el, center);
-      if (!place || seen.has(place.placeId)) continue;
-      seen.add(place.placeId);
-      places.push(place);
+    const collect = (els: OverpassElement[]) => {
+      for (const el of els) {
+        const place = elementToPlace(el, center);
+        if (!place || seen.has(place.placeId)) continue;
+        seen.add(place.placeId);
+        places.push(place);
+      }
+    };
+    collect(elements);
+
+    // Seçili kategori 0 sonuç döndürse bile kullanıcıya "Sonuç bulunamadı"
+    // yerine yakındaki genel popüler noktalar gösterilir.
+    if (places.length === 0 && opts.categoryIds?.length) {
+      const popQl = buildAroundQuery({
+        center,
+        radius: 15000,
+        categoryIds: POPULAR_FALLBACK_IDS,
+        limit,
+      });
+      if (popQl) collect(await queryOverpass(popQl));
     }
+
     places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
     return places;
   });
