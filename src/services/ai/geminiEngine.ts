@@ -23,7 +23,40 @@ import {
   type AIResponse,
 } from "./types";
 
-const API_KEY = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim();
+const API_KEY = readApiKey();
+
+/**
+ * .env'den anahtarı temiz okur: tırnak/boşluk kalıntılarını atar,
+ * boş veya hatalı formatlı anahtarı eleyip konsola hata yazar.
+ * Bozuk anahtar asla ağa gönderilmez (401 üretmesin diye sessizce
+ * çevrimdışı yedek motora düşülür).
+ */
+function readApiKey(): string | undefined {
+  const raw = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+  if (raw == null) {
+    console.error(
+      "[gemini] VITE_GEMINI_API_KEY tanımlı değil (.env dosyasını kontrol edin).",
+    );
+    return undefined;
+  }
+  const key = raw
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim();
+  if (!key) {
+    console.error(
+      "[gemini] VITE_GEMINI_API_KEY boş okundu (.env dosyasını kontrol edin).",
+    );
+    return undefined;
+  }
+  if (!/^AIza[0-9A-Za-z_-]{30,}$/.test(key)) {
+    console.error(
+      "[gemini] API anahtarı beklenen 'AIza...' formatında değil; .env değerindeki tırnak/boşlukları kontrol edin.",
+    );
+    return undefined;
+  }
+  return key;
+}
 const MODEL = "gemini-flash-latest";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
@@ -66,6 +99,7 @@ async function callGemini(
   originLabel: string,
   venueWanted: boolean,
 ): Promise<AIResponse> {
+  if (!API_KEY) throw new Error("gemini-no-key");
   const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
 
   for (const m of req.history ?? []) {
@@ -92,9 +126,14 @@ ${buildCandidateBlock(candidates.map((c) => c.place))}`
     parts: [{ text: `${contextLines}\n\nKullanıcının sorusu: ${req.query}` }],
   });
 
-  const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(API_KEY!)}`, {
+  // Anahtar URL yerine başlıkla gider (Google'ın önerdiği yöntem):
+  // URL kodlama/bozulma sınıfı hataları ve log'lara anahtar sızması engellenir.
+  const res = await fetch(ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": API_KEY,
+    },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents,
