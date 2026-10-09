@@ -101,8 +101,8 @@ export function AIScreen() {
       ]);
     } catch (err) {
       const msg =
-        err instanceof AIUnavailableError
-          ? "AI şu anda cevap veremedi. Bağlantını kontrol edip tekrar dener misin?"
+        err instanceof AIUnavailableError && err.message
+          ? err.message
           : "AI şu anda cevap veremedi. Birazdan tekrar dene.";
       setMessages((prev) => [...prev, { id: uid(), role: "assistant", text: msg }]);
     } finally {
