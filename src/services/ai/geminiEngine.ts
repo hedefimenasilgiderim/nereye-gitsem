@@ -1,21 +1,19 @@
 /**
- * Gemini LLM keşif motoru.
+ * Gemini LLM keşif motoru (tek AI sağlayıcısı).
  *
- * Uydurma yasağı burada da geçerlidir: modele yalnızca gerçek OSM verisinden
- * gelen mekân listesi verilir ve SADECE bu listedeki mekânları önermesi
- * istenir. Fiyat/saat/adres bilgisi veri kümesinde yoksa söylememesi
- * istenir. Cevaptaki mekân adları gerçek Place nesneleriyle eşleştirilir;
- * eşleşmeyen adlar öneri kartlarına dönüştürülmez.
+ * İlke: kullanıcı mesajı %100 DOĞRUDAN Gemini API'ye gider. Mesajı
+ * engelleyen, kelime arayan veya hazır şablon döndüren kural katmanı
+ * yoktur. Aday mekân listesi yalnızca veri olarak hazırlanır; yanıtı
+ * her durumda model kurar.
  *
- * API anahtarı .env üzerinden okunur (VITE_GEMINI_API_KEY). Anahtar yoksa
- * veya istek başarısız olursa yerel motora (localEngine) geri düşülür —
- * uygulama hiçbir durumda boş cevap vermez.
+ * API anahtarı .env üzerinden okunur (VITE_GEMINI_API_KEY). Anahtar
+ * yoksa veya istek başarısız olursa hata fırlatılır; kural bazlı
+ * yedek yanıt üretilmez.
  */
 
 import type { Place } from "../../models/types";
-import { normalizeTr } from "../../data/cities";
+import { findCityByName, normalizeTr } from "../../data/cities";
 import { getNearbyPlaces } from "../osm";
-import { localEngine, parseIntent, isVenueRequest } from "./localEngine";
 import {
   AIUnavailableError,
   type AIProvider,
@@ -28,8 +26,7 @@ const API_KEY = readApiKey();
 /**
  * .env'den anahtarı temiz okur: tırnak/boşluk kalıntılarını atar,
  * boş veya hatalı formatlı anahtarı eleyip konsola hata yazar.
- * Bozuk anahtar asla ağa gönderilmez (401 üretmesin diye sessizce
- * çevrimdışı yedek motora düşülür).
+ * Bozuk anahtar asla ağa gönderilmez (401 üretmesin diye istek atılmaz).
  */
 function readApiKey(): string | undefined {
   const raw = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
@@ -60,7 +57,7 @@ function readApiKey(): string | undefined {
 const MODEL = "gemini-flash-latest";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
-const SYSTEM_PROMPT = `Sen Nereye Gitsem uygulamasının yapay zeka seyahat asistanısın. Kullanıcı seninle sohbet ettiğinde, soru sorduğunda veya dertleştiğinde tamamen doğal, samimi ve zeki bir insan gibi cevap ver. Sadece kullanıcı açıkça bir mekan/yer önerisi istediğinde lokasyon önerilerinde bulun.`;
+const SYSTEM_PROMPT = `Sen Nereye Gitsem uygulamasının akıllı, samimi ve arkadaş canlısı AI Keşif Asistanısın. Kullanıcı seninle sohbet etmek istediğinde, hal hatır sorduğunda tamamen doğal bir insan gibi konuş. Yalnızca kullanıcı spesifik bir yer/mekân/gezilecek yer istediğinde lokasyon önerilerini kart yapısında sun.`;
 
 interface GeminiCandidate {
   name: string;
@@ -97,7 +94,6 @@ async function callGemini(
   req: AIRequest,
   candidates: GeminiCandidate[],
   originLabel: string,
-  venueWanted: boolean,
 ): Promise<AIResponse> {
   if (!API_KEY) throw new Error("gemini-no-key");
   const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
@@ -114,9 +110,7 @@ async function callGemini(
     candidates.length > 0
       ? `Gerçek mekân listesi (mekân önerisi istendiyse SADECE bunlardan öner, adları tam haliyle yaz):
 ${buildCandidateBlock(candidates.map((c) => c.place))}`
-      : venueWanted
-        ? "Kullanıcı mekân önerisi istedi ancak bu kriterde gerçek mekân bulunamadı (veya konum bilinmiyor). Bunu doğal bir dille söyle; gerekirse şehir veya kriter sor. Hayali mekân ismi verme."
-        : "Bu turda mekân önerisi istenmedi; doğal şekilde sohbet et, mekân adı geçirme.",
+      : "Elinde gerçek mekân listesi yok; mekân adı uydurma, hayali yer önerme.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -168,61 +162,52 @@ export const geminiEngine: AIProvider = {
   id: "gemini-osm-engine",
 
   async recommend(req: AIRequest): Promise<AIResponse> {
-    // Anahtar yoksa çevrimdışı yedek motora düş (Gemini'ye ulaşılamayan
-    // tek durum). Anahtar varken HER mesaj doğrudan Gemini'ye gider;
-    // arada engelleyen kural/şablon yoktur.
-    if (!API_KEY) return localEngine.recommend(req);
+    if (!API_KEY) {
+      throw new AIUnavailableError(
+        "AI anahtarı tanımlı değil. Devam etmek için VITE_GEMINI_API_KEY ekleyin.",
+      );
+    }
 
-    // Niyet ayrıştırması SADECE veri amaçlıdır (konum + aday mekânlar);
-    // yanıta asla müdahale etmez.
-    const userTexts = (req.history ?? [])
-      .filter((m) => m.role === "user")
-      .map((m) => m.text);
-    const combinedTexts = [...userTexts.slice(0, 2), req.query].join(" ");
-    const intent = parseIntent(combinedTexts, req.context);
-    const gq = normalizeTr(req.query);
-    if (["daha uygun", "ucuz", "bedava", "ekonomik", "daha az"].some((w) => gq.includes(w)))
-      intent.freeOnly = true;
-    if (["daha yakın", "yakın", "yakınımda"].some((w) => gq.includes(w)))
-      intent.nearMe = true;
+    // Konum SADECE yapısal bağlamdan alınır (mesaj taranmaz): GPS izni
+    // veya kullanıcının seçtiği şehir. Aday liste tüm kategorilerden
+    // hazırlanır; seçimi model yapar.
+    const selected = req.context.selectedCity
+      ? findCityByName(req.context.selectedCity)
+      : undefined;
+    const center = req.context.userCoords ??
+      (selected ? { lat: selected.lat, lon: selected.lon } : undefined);
 
-    const center =
-      intent.nearMe && req.context.userCoords
-        ? req.context.userCoords
-        : intent.cityCoords ?? req.context.userCoords;
-
+    const cityName = req.context.selectedCity ?? req.context.userCity;
     const originLabel =
-      intent.nearMe && req.context.userCoords
-        ? "kullanıcı konumunu paylaşıyor, çevresindeki yerler öncelikli"
-        : intent.city
-          ? `ilgilendiği şehir: ${intent.city}`
-          : "kullanıcı konumu biliniyor";
+      [
+        req.context.userCoords
+          ? `kullanıcı konumu: ${req.context.userCoords.lat},${req.context.userCoords.lon}`
+          : "",
+        cityName ? `ilgili şehir: ${cityName}` : "",
+      ]
+        .filter(Boolean)
+        .join("; ") || "kullanıcı konumu bilinmiyor";
 
-    // Aday mekânlar YALNIZCA veri olarak hazırlanır; boşsa bile yanıtı
-    // Gemini kurar (şablon yok).
-    const venueWanted = isVenueRequest(combinedTexts, intent);
     let candidates: GeminiCandidate[] = [];
-    if (venueWanted && center) {
+    if (center) {
       try {
         const { places } = await getNearbyPlaces({
           center,
-          radius: intent.nearMe ? 5000 : 15000,
-          categoryIds: intent.categoryIds,
-          limit: 30,
+          radius: 15000,
+          limit: 100,
         });
-        candidates = places.slice(0, 20).map((p) => ({
+        candidates = places.slice(0, 30).map((p) => ({
           name: p.name,
           label: [p.name, p.city, p.district].filter(Boolean).join(" / "),
           place: p,
         }));
       } catch {
-        // Veri katmanı sustu: adaylar boş gider, durumu Gemini doğal
-        // dille açıklar.
+        // Veri katmanı sustu: adaylar boş gider, yanıtı model kurar.
       }
     }
 
     try {
-      return await callGemini(req, candidates, originLabel, venueWanted);
+      return await callGemini(req, candidates, originLabel);
     } catch {
       throw new AIUnavailableError();
     }
