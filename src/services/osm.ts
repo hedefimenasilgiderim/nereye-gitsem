@@ -211,9 +211,8 @@ function buildAroundQuery(opts: {
     ? CATEGORIES.filter((c) => opts.categoryIds!.includes(c.id))
     : CATEGORIES;
   const lines: string[] = [];
-  // WAF/timeout koruması: 5 km ana arama; 0 sonuç durumunda 15 km
-  // fallback'e izin vermek için üst sınır 15 km.
-  const cappedRadius = Math.min(Math.round(opts.radius), 15000);
+  // WAF/timeout koruması: yarıçap en fazla 35 km.
+  const cappedRadius = Math.min(Math.round(opts.radius), 35000);
   const around = `(around:${cappedRadius},${opts.center.lat},${opts.center.lon})`;
 
   for (const cat of cats) {
@@ -246,7 +245,7 @@ function buildAroundQuery(opts: {
 
 /** Maksimum kabul edilebilir mesafe (metre). Bu değerden uzak mekanlar
  * cache, Overpass veya fallback'den gelse bile asla gösterilmez. */
-const MAX_ACCEPTABLE_DISTANCE_M = 20000;
+const MAX_ACCEPTABLE_DISTANCE_M = 35000;
 
 export interface NearbyOptions {
   center: Coordinates;
