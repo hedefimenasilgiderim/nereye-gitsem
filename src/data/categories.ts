@@ -34,7 +34,10 @@ export const CATEGORIES: CategoryDef[] = [
     color: "#0284c7",
     tagFilters: [
       { natural: ["beach"] },
-      { leisure: ["beach_resort"] },
+      { leisure: ["beach_resort", "marina", "park"] },
+      { man_made: ["pier"] },
+      { tourism: ["viewpoint"] },
+      { amenity: ["cafe"] },
     ],
   },
   {
@@ -43,8 +46,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "☕",
     color: "#92400e",
     tagFilters: [
-      { amenity: ["cafe", "fast_food"] },
-      { shop: ["coffee", "bakery"] },
+      { amenity: ["cafe", "fast_food", "bistro"] },
+      { shop: ["coffee", "bakery", "pastry", "confectionery"] },
     ],
   },
   {
@@ -62,7 +65,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: "Gezilecek Yer",
     emoji: "📍",
     color: "#0d9488",
-    tagFilters: [{ tourism: ["attraction", "artwork"] }],
+    tagFilters: [
+      { tourism: ["attraction", "artwork", "viewpoint"] },
+      { historic: ["*"] },
+      { leisure: ["park", "garden"] },
+      { place: ["square"] },
+    ],
   },
   {
     id: "event",

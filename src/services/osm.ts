@@ -289,6 +289,10 @@ function clampByDistance(
   });
 }
 
+/** Aynı docId için eşzamanlı tek getNearbyPlaces çalıştırmasını garantiler.
+ * React strict mode / hızlı tıklamalar nedeniyle oluşan çift istekleri önler. */
+const inFlight = new Map<string, Promise<NearbyResult>>();
+
 export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult> {
   const { center } = opts;
   const radius = Math.min(opts.radius ?? 4000, MAX_ACCEPTABLE_DISTANCE_M);
@@ -308,6 +312,33 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
     opts.cityKey ??
     `geo_${center.lat.toFixed(2)}_${center.lon.toFixed(2)}`;
 
+  const fb = await loadFirebaseCache().catch(() => null);
+  const docId = fb ? fb.placeCacheDocId(cityKey, categoryId) : null;
+  const flightKey = docId ?? `${cityKey}_${categoryId}_${center.lat.toFixed(3)}_${center.lon.toFixed(3)}`;
+
+  const existing = inFlight.get(flightKey);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<NearbyResult> => {
+    try {
+      return await getNearbyPlacesInternal(opts, center, radius, limit, fb, docId);
+    } finally {
+      inFlight.delete(flightKey);
+    }
+  })();
+
+  inFlight.set(flightKey, promise);
+  return promise;
+}
+
+async function getNearbyPlacesInternal(
+  opts: NearbyOptions,
+  center: Coordinates,
+  radius: number,
+  limit: number,
+  fb: Awaited<ReturnType<typeof loadFirebaseCache>> | null,
+  docId: string | null,
+): Promise<NearbyResult> {
   // Yerel kategorik veri: Overpass patlarsa/boş dönerse SESSİZCE devreye
   // girer. Kesin kategori filtresi — başka kategori asla karıştırılmaz.
   const localPlaces = () =>
@@ -318,23 +349,20 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
     );
 
   // Cache-first: Firestore'da veri varsa Overpass'e HİÇBİR istek atılmaz.
-  let docId: string | null = null;
-  try {
-    const fb = await loadFirebaseCache();
-    docId = fb.placeCacheDocId(cityKey, categoryId);
-    const cachedPlaces = await fb.readPlaceCache(docId);
-    if (cachedPlaces && cachedPlaces.length > 0) {
-      // Önbellekteki eski/kötü kayıtları (20 km+) SERT şekilde siler.
-      const valid = clampByDistance(cachedPlaces, center);
-      if (valid.length > 0) {
-        return {
-          places: sortFallbackByDistance(valid, center, haversineMeters),
-        };
+  if (docId) {
+    try {
+      const cachedPlaces = await fb!.readPlaceCache(docId);
+      if (cachedPlaces && cachedPlaces.length > 0) {
+        const valid = clampByDistance(cachedPlaces, center);
+        if (valid.length > 0) {
+          return {
+            places: sortFallbackByDistance(valid, center, haversineMeters),
+          };
+        }
       }
-      // Cache tamamen geçersizse; tekrar Overpass'ten doldurulur.
+    } catch {
+      /* Firebase erişilemez: devam et */
     }
-  } catch {
-    /* Firebase yok/erişilemez: Overpass → yerel veri akışıyla devam */
   }
 
   const ql = buildAroundQuery({ center, radius, categoryIds: opts.categoryIds, limit });
@@ -352,42 +380,25 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
       places.push(place);
     }
 
-    // Overpass sonuçları da 20 km'den uzaksa filtrelenir.
     const valid = clampByDistance(places, center);
 
     if (valid.length === 0) {
-      // Ağ çalıştı ama kayıt dönmedi: yerel kategorik veri gösterilir ve
-      // kısa TTL ile önbelleğe yazılır (gerçek veri sonra üzerine yazar).
       const local = localPlaces();
       if (docId) {
-        void loadFirebaseCache()
-          .then((fb) =>
-            fb.writePlaceCache(docId!, local, "fallback", fb.FALLBACK_CACHE_TTL_MS),
-          )
-          .catch(() => {});
+        void fb?.writePlaceCache(docId, local, "fallback", fb.FALLBACK_CACHE_TTL_MS).catch(() => {});
       }
       return { places: local };
     }
 
-    // Read-through: sonuçlar Firestore'a yazılır; sonraki kullanıcılar
-    // bu veriyi milisaniyeler içinde alır.
     valid.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
     if (docId) {
-      void loadFirebaseCache()
-        .then((fb) => fb.writePlaceCache(docId!, valid, "overpass"))
-        .catch(() => {});
+      void fb?.writePlaceCache(docId, valid, "overpass").catch(() => {});
     }
     return { places: valid };
   } catch {
-    // Overpass patladı / zaman aşımı: hata ekranı YOK. Yerel
-    // kategorik veri hem ekrana basılır hem önbelleğe yazılır.
     const local = localPlaces();
     if (docId) {
-      void loadFirebaseCache()
-        .then((fb) =>
-          fb.writePlaceCache(docId!, local, "fallback", fb.FALLBACK_CACHE_TTL_MS),
-        )
-        .catch(() => {});
+      void fb?.writePlaceCache(docId, local, "fallback", fb.FALLBACK_CACHE_TTL_MS).catch(() => {});
     }
     return { places: local };
   }
