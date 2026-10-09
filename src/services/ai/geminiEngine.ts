@@ -15,7 +15,7 @@
 import type { Place } from "../../models/types";
 import { normalizeTr } from "../../data/cities";
 import { getNearbyPlaces, NoSourceError } from "../osm";
-import { localEngine, parseIntent } from "./localEngine";
+import { localEngine, parseIntent, isVenueRequest, chitChatReply } from "./localEngine";
 import {
   AIUnavailableError,
   type AIProvider,
@@ -34,8 +34,9 @@ KURALLAR (bunları ASLA ihlal etme):
 2. Fiyat, çalışma saati, adres veya puan bilgisini asla uydurma. Bu bilgi listesinde olmayan bir mekân için "giriş ücreti bilmiyorum, mekân sayfasında gösterilir" gibi dürüst ol.
 3. Mekân adını listedeki tam haliyle yaz ki uygulama onu gerçek mekân kartına bağlayabilsin.
 4. Türkçe, samimi ama kısa cevap ver. Önerileri madde madde ver; her maddede mekân adı + (şehir/ilçe) + en fazla bir cümle gerekçe.
-5. Kullanıcının konumu veya seçtiği şehir yoksa, hangi şehirde gezmek istediğini sor.
-6. Gezi dışı konularda (kod, tarih, siyaset vb.) yardımcı olmadığını, senin bir gezi asistanı olduğunu belirt.`;
+ 5. Kullanıcının konumu veya seçtiği şehir yoksa, hangi şehirde gezmek istediğini sor.
+ 6. Gezi dışı konularda (kod, tarih, siyaset vb.) yardımcı olmadığını, senin bir gezi asistanı olduğunu belirt.
+ 7. Kullanıcı selam/sohbet amaçlı yazdığında veya net bir mekân isteği vermediğinde mekân adı GEÇİRME (mekân adları kartlara dönüştürülür); sadece doğal şekilde sohbet et ve tek bir açık soruyla ne aradığını öğren.`;
 
 interface GeminiCandidate {
   name: string;
@@ -132,6 +133,25 @@ export const geminiEngine: AIProvider = {
   id: "gemini-osm-engine",
 
   async recommend(req: AIRequest): Promise<AIResponse> {
+    // SOHBET KAPISI: selam/sohbet mesajlarında mekân araması ve LLM
+    // çağrısı YAPILMAZ — yalnızca metin cevap verilir, kart dökülmez.
+    const combinedTexts = [
+      ...(req.history ?? [])
+        .filter((m) => m.role === "user")
+        .map((m) => m.text)
+        .slice(0, 2),
+      req.query,
+    ].join(" ");
+    const gateIntent = parseIntent(combinedTexts, req.context);
+    const gq = normalizeTr(req.query);
+    if (["daha uygun", "ucuz", "bedava", "ekonomik", "daha az"].some((w) => gq.includes(w)))
+      gateIntent.freeOnly = true;
+    if (["daha yakın", "yakın", "yakınımda"].some((w) => gq.includes(w)))
+      gateIntent.nearMe = true;
+    if (!isVenueRequest(combinedTexts, gateIntent)) {
+      return { engine: this.id, text: chitChatReply(req.query), places: [] };
+    }
+
     // Anahtar yoksa sessizce yerel motora düş.
     if (!API_KEY) return localEngine.recommend(req);
 

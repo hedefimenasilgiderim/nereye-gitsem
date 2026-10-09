@@ -52,6 +52,85 @@ const KEYWORD_MAP: Array<{
 const NEAR_WORDS = ["yakın", "yakınımda", "yakin", "etraf", "burada", "çevre", "cevre", "bana yakın"];
 const FREE_WORDS = ["ucuz", "ekonomik", "bedava", "ücretsiz", "ucretsiz", "parasız", "parasiz", "az para"];
 
+/**
+ * SOHBET KAPISI — mekân isteği ayrımı.
+ *
+ * Kullanıcı net bir mekân/yer aramadığı sürece (selam, nasılsın, hava
+ * nasıl, çantamda ne olmalı, genel tavsiye vb.) mekân araması
+ * TETİKLENMEZ ve UI'a kart DÖKÜLMEZ; yalnızca metin cevap verilir.
+ * Kartlar YALNIZCA açık isteklerde gösterilir:
+ *   - kategori niyeti (kafe, restoran, plaj, ...) veya
+ *   - yakınlık niyeti (yakınımda, çevremde, ...) veya
+ *   - fiyat niyeti (ucuz, ekonomik, ...) veya
+ *   - yer-yönelimli kelime (nereye, nerede, mekân, listele, gezilecek ...)
+ */
+const VENUE_PLACE_WORDS = [
+  "nereye", "nerede", "mekan", "listele", "liste",
+  "gezilecek", "gorulecek", "gezi", "yer ariyorum",
+  "ne yapabilirim", "gideyim", "gidelim", "onerirsin",
+];
+
+export function isVenueRequest(combined: string, intent: Intent): boolean {
+  if (intent.categoryIds?.length) return true;
+  if (intent.nearMe) return true;
+  if (intent.freeOnly) return true;
+  const q = normalizeTr(combined);
+  return VENUE_PLACE_WORDS.some((w) => q.includes(w));
+}
+
+function tokensOf(s: string): string[] {
+  return normalizeTr(s).split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+function hasToken(q: string, words: string[]): boolean {
+  const tokens = tokensOf(q);
+  return words.some((w) => tokens.includes(w));
+}
+
+/**
+ * Mekân isteği İÇERMEYEN mesajlara verilen salt-metin sohbet cevabı.
+ * Asla mekân adı geçirmez (mekân adları kartlara dönüştüğü için) ve
+ * öneri baskısı yapmaz; soruya odaklanır.
+ */
+export function chitChatReply(query: string): string {
+  const q = normalizeTr(query);
+
+  if (
+    hasToken(q, ["gorusuruz", "baybay", "hosca"]) ||
+    q.includes("hosca kal") || q.includes("bay bay")
+  ) {
+    return "Görüşürüz! İyi gezmeler! 👋";
+  }
+  if (
+    hasToken(q, ["tesekkur", "tesekkurler", "sagol", "eyvallah"]) ||
+    q.includes("sag ol")
+  ) {
+    return "Rica ederim! 😊 Başka bir şey merak edersen buradayım.";
+  }
+  if (
+    hasToken(q, ["nasilsin", "naber"]) ||
+    q.includes("ne haber") || q.includes("nasil gidiyor")
+  ) {
+    return "İyiyim, teşekkürler! 😊 Sen nasılsın? Gezi planın varsa yardımcı olabilirim.";
+  }
+  if (
+    hasToken(q, ["selam", "merhaba", "mrb", "gunaydin", "hey", "gunler", "aksamlar"]) ||
+    q.includes("iyi aksam") || q.includes("iyi gun")
+  ) {
+    return "Merhaba! 😊 Ben gezi asistanınım. Hangi şehirde, nasıl bir yer arıyorsun? Örneğin: \"Kadıköy'de sakin bir kafe\".";
+  }
+  if (q.includes("hava")) {
+    return "Canlı hava durumunu takip edemiyorum. Ama gezi planın için yardımcı olabilirim — hangi şehirde, nasıl bir yer arıyorsun?";
+  }
+  if (
+    q.includes("canta") || q.includes("bavul") || q.includes("hazirlik") ||
+    q.includes("yanima ne") || q.includes("ne almali") || q.includes("ne olmali")
+  ) {
+    return "Genel bir gezi çantası için rahat ayakkabı, su/matara, powerbank, havaya göre ince bir katman ve kimlik yeterli olur. Nereye gidiyorsun? Söylersen daha net yardımcı olurum. 🙂";
+  }
+  return "Sana en iyi şekilde yardımcı olabilmem için ne aradığını biraz açar mısın? Örneğin: \"Yakınımda restoran\" ya da \"İzmir'de gezilecek yerler\". 🙂";
+}
+
 /** Gemini motorunun da gerçek OSM verisi çekmesi için dışa açılmıştır. */
 export function parseIntent(query: string, ctx: AIRequest["context"]): Intent {
   const q = normalizeTr(query);
@@ -151,6 +230,12 @@ export const localEngine: AIProvider = {
       intent.freeOnly = true;
     if (["daha yakın", "yakın", "yakınımda"].some((w) => q.includes(w)))
       intent.nearMe = true;
+
+    // SOHBET KAPISI: net bir mekân isteği yoksa mekân araması YAPILMAZ,
+    // kart DÖKÜLMEZ — yalnızca metin cevap verilir.
+    if (!isVenueRequest(combined, intent)) {
+      return { engine: this.id, text: chitChatReply(query), places: [] };
+    }
 
     const center = intent.nearMe && context.userCoords
       ? context.userCoords
