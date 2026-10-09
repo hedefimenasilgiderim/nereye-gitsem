@@ -277,9 +277,9 @@ const MAX_ACCEPTABLE_DISTANCE_M = 50000;
 /** Kademeli yarıçap merdiveni: sonuç eşiğinin altındaysa sorgu bir üst
  * kademede tekrarlanır (Türkiye'nin 81 ilinde ölçeklenebilir — şehir
  * bazlı yama yok). */
-const RADIUS_TIERS_M = [20000, 35000, 50000];
+const RADIUS_TIERS_M = [15000, 35000, 50000];
 /** Bir kademede yeterli kabul edilen minimum sonuç sayısı. */
-const MIN_RESULTS_THRESHOLD = 10;
+const MIN_RESULTS = 8;
 
 export interface NearbyOptions {
   center: Coordinates;
@@ -418,7 +418,7 @@ async function getNearbyPlacesInternal(
 
   try {
     // Kademeli yarıçap: 15 km'den başlar, sonuç eşiğin (8) altındaysa
-    // 30 km, sonra 50 km ile tekrar dener. Her kademe TEK istektir
+    // 35 km, sonra 50 km ile tekrar dener. Her kademe TEK istektir
     // (paralel istek yok); eşik yakalanınca durur.
     const seen = new Set<string>();
     const places: Place[] = [];
@@ -444,7 +444,7 @@ async function getNearbyPlacesInternal(
         break;
       }
       const soFar = clampByDistance(places, center);
-      if (soFar.length >= MIN_RESULTS_THRESHOLD) break;
+      if (soFar.length >= MIN_RESULTS) break;
     }
 
     const valid = clampByDistance(places, center);

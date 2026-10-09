@@ -32,12 +32,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: "Deniz / Plaj",
     emoji: "🌊",
     color: "#0284c7",
+    // Türkiye geneli kıyı etiketleri (katı saflık: kafe/park/viewpoint
+    // buraya karıştırılmaz — onlar kendi kategorilerinde sorgulanır).
     tagFilters: [
       { natural: ["beach"] },
-      { leisure: ["beach_resort", "marina", "park", "water_park"] },
+      { leisure: ["beach_resort", "marina", "water_park"] },
       { man_made: ["pier"] },
-      { tourism: ["viewpoint"] },
-      { amenity: ["cafe"] },
       { waterway: ["riverbank"] },
     ],
   },
@@ -57,7 +57,7 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "🍽️",
     color: "#dc2626",
     tagFilters: [
-      { amenity: ["restaurant", "food_court", "bistro", "bar", "pub"] },
+      { amenity: ["restaurant", "food_court", "bistro"] },
       { craft: ["caterer"] },
     ],
   },
@@ -67,7 +67,7 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "📍",
     color: "#0d9488",
     tagFilters: [
-      { tourism: ["attraction", "artwork", "viewpoint", "museum"] },
+      { tourism: ["attraction", "viewpoint", "museum"] },
       { historic: ["*"] },
       { leisure: ["park", "garden"] },
       { place: ["square"] },
@@ -111,10 +111,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "🎮",
     color: "#4f46e5",
     tagFilters: [
-      { amenity: ["cinema", "theatre", "nightclub", "arts_centre"] },
-      { leisure: ["amusement_arcade", "escape_game", "bowling_alley", "water_park", "theme_park", "sports_centre"] },
-      { tourism: ["theme_park"] },
-      { sport: ["karting"] },
+      { amenity: ["cinema"] },
+      { leisure: ["amusement_arcade", "water_park", "bowling_alley", "theme_park"] },
     ],
   },
   {
@@ -126,8 +124,8 @@ export const CATEGORIES: CategoryDef[] = [
     // şelaleler, sahil ve otantik noktalar.
     tagFilters: [
       { tourism: ["viewpoint", "artwork"] },
-      { historic: ["monument", "memorial", "castle", "ruins"] },
-      { natural: ["beach", "peak", "waterfall"] },
+      { historic: ["monument", "castle"] },
+      { natural: ["peak"] },
     ],
   },
 ];
