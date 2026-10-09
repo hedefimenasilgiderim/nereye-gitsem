@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigation } from "../app/navigation";
 import { useAppState } from "../app/state";
 import { createAIProvider, AIUnavailableError } from "../services/ai";
+import type { AIResponse } from "../services/ai";
 import type { Place } from "../models/types";
 import { PlaceCard } from "../components/PlaceCard";
 import * as storage from "../services/storage";
@@ -72,39 +73,82 @@ export function AIScreen() {
     const q = text.trim();
     if (!q || busy) return;
     setInput("");
+    const assistantId = uid();
     setMessages((prev) => [...prev, { id: uid(), role: "user", text: q }]);
     setBusy(true);
 
+    const req = {
+      query: q,
+      context: {
+        userCoords:
+          location.status === "granted"
+            ? { lat: location.coords.lat, lon: location.coords.lon }
+            : undefined,
+        userCity:
+          location.status === "granted" ? location.city : undefined,
+        selectedCity,
+      },
+      history: messages.slice(-20).map((m) => ({ role: m.role, text: m.text })),
+    };
+
     try {
-      const res = await providerRef.current!.recommend({
-        query: q,
-        context: {
-          userCoords:
-            location.status === "granted"
-              ? { lat: location.coords.lat, lon: location.coords.lon }
-              : undefined,
-          userCity:
-            location.status === "granted" ? location.city : undefined,
-          selectedCity,
-        },
-        history: messages.slice(-20).map((m) => ({ role: m.role, text: m.text })),
-      });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: "assistant",
-          text: res.text,
-          places: res.places,
-          engine: res.engine,
-        },
-      ]);
+      const provider = providerRef.current!;
+      let res: AIResponse;
+      if (provider.recommendStream) {
+        // Streaming: önce boş asistan balonu açılır, chunk'lar geldikçe dolar.
+        setMessages((prev) => [...prev, { id: assistantId, role: "assistant", text: "" }]);
+        try {
+          res = await provider.recommendStream(req, (partial) => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, text: partial } : m)),
+            );
+          });
+        } catch {
+          // Akış patlarsa tek-seferlik çağrıya düşülür.
+          setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+          res = await provider.recommend(req);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: assistantId,
+              role: "assistant",
+              text: res.text,
+              places: res.places,
+              engine: res.engine,
+            },
+          ]);
+          return;
+        }
+      } else {
+        res = await provider.recommend(req);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantId,
+            role: "assistant",
+            text: res.text,
+            places: res.places,
+            engine: res.engine,
+          },
+        ]);
+        return;
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, text: res.text, places: res.places, engine: res.engine }
+            : m,
+        ),
+      );
     } catch (err) {
       const msg =
         err instanceof AIUnavailableError && err.message
           ? err.message
           : "AI şu anda cevap veremedi. Birazdan tekrar dene.";
-      setMessages((prev) => [...prev, { id: uid(), role: "assistant", text: msg }]);
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== assistantId),
+        { id: uid(), role: "assistant", text: msg },
+      ]);
     } finally {
       setBusy(false);
     }
@@ -122,15 +166,17 @@ export function AIScreen() {
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.map((m) => (
           <div key={m.id}>
-            <div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${
-                m.role === "user"
-                  ? "ml-auto bg-brand text-white"
-                  : "bg-surface text-ink-soft shadow-sm"
-              }`}
-            >
-              {m.text}
-            </div>
+            {m.text !== "" && (
+              <div
+                className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${
+                  m.role === "user"
+                    ? "ml-auto bg-brand text-white"
+                    : "bg-surface text-ink-soft shadow-sm"
+                }`}
+              >
+                {m.text}
+              </div>
+            )}
             {m.places && m.places.length > 0 && (
               <div className="mt-2 space-y-2">
                 {m.places.map((p) => (

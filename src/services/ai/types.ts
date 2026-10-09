@@ -44,6 +44,15 @@ export interface AIResponse {
 export interface AIProvider {
   id: string;
   recommend(req: AIRequest): Promise<AIResponse>;
+  /**
+   * Streaming öneri: her metin parçası geldikçe `onChunk` birikmiş
+   * metinle çağrılır (UI canlı döker). Desteklenmiyorsa tanımsız
+   * kalır; çağıran `recommend`'e düşer.
+   */
+  recommendStream?(
+    req: AIRequest,
+    onChunk: (partialText: string) => void,
+  ): Promise<AIResponse>;
 }
 
 export class AIUnavailableError extends Error {
