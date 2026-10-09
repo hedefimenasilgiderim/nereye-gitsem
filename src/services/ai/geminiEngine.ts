@@ -23,17 +23,18 @@ import {
 
 const API_KEY = readApiKey();
 
-/**
- * .env / ortam değişkeninden anahtarı temiz okur: tırnak/boşluk
- * kalıntılarını atar. Boş gelirse yalnızca uyarı yazar; bozuk anahtar
- * asla ağa gönderilmez (401 üretmesin diye istek atılmaz).
- */
 // Tarayıcıda `process` yoktur; Vite `define` ile derleme anında gömülür.
+// Bildirim yalnızca tsc içindir.
 declare const process:
   | { env: Record<string, string | undefined> }
   | undefined;
 
-function readApiKey(): string | undefined {
+/**
+ * Anahtarı çift kaynaktan okur (önce Vite, yedek Node/process).
+ * Boş gelse bile çağrıyı engellemez; yalnızca konsola hata yazar ve
+ * istek denenir (401/403 olursa kullanıcıya açıklayıcı hata gösterilir).
+ */
+function readApiKey(): string {
   const apiKey = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
   const nodeKey =
     typeof process !== "undefined"
@@ -43,14 +44,7 @@ function readApiKey(): string | undefined {
     .replace(/^["']|["']$/g, "")
     .trim();
   if (!key) {
-    console.warn("VITE_GEMINI_API_KEY eksik");
-    return undefined;
-  }
-  if (!/^AIza[0-9A-Za-z_-]{30,}$/.test(key)) {
-    console.error(
-      "[gemini] API anahtarı beklenen 'AIza...' formatında değil; .env değerindeki tırnak/boşlukları kontrol edin.",
-    );
-    return undefined;
+    console.error("Gemini Key Missing");
   }
   return key;
 }
@@ -95,7 +89,6 @@ async function callGemini(
   candidates: GeminiCandidate[],
   originLabel: string,
 ): Promise<AIResponse> {
-  if (!API_KEY) throw new Error("gemini-no-key");
   const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
 
   for (const m of req.history ?? []) {
@@ -137,6 +130,9 @@ ${buildCandidateBlock(candidates.map((c) => c.place))}`
 
   if (!res.ok) {
     const status = res.status;
+    if (status === 400 || status === 401 || status === 403) {
+      throw Object.assign(new Error("gemini-auth"), { status });
+    }
     if (status === 429 || status === 503 || status >= 500) {
       throw Object.assign(new Error("gemini-busy"), { status });
     }
@@ -162,11 +158,8 @@ export const geminiEngine: AIProvider = {
   id: "gemini-osm-engine",
 
   async recommend(req: AIRequest): Promise<AIResponse> {
-    if (!API_KEY) {
-      throw new AIUnavailableError(
-        "AI anahtarı tanımlı değil. Devam etmek için VITE_GEMINI_API_KEY ekleyin.",
-      );
-    }
+    // Anahtar boş olsa bile istek denenir; kimlik hatası olursa
+    // kullanıcıya açıklayıcı mesaj gösterilir (istemcide engelleme yok).
 
     // Konum SADECE yapısal bağlamdan alınır (mesaj taranmaz): GPS izni
     // veya kullanıcının seçtiği şehir. Aday liste tüm kategorilerden
@@ -208,7 +201,12 @@ export const geminiEngine: AIProvider = {
 
     try {
       return await callGemini(req, candidates, originLabel);
-    } catch {
+    } catch (err) {
+      if ((err as Error).message === "gemini-auth") {
+        throw new AIUnavailableError(
+          "Gemini API anahtarı eksik veya geçersiz (401/403). Lütfen VITE_GEMINI_API_KEY değerini kontrol edin.",
+        );
+      }
       throw new AIUnavailableError();
     }
   },
