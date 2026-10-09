@@ -261,7 +261,10 @@ function buildAroundQuery(opts: {
   }
 
   if (lines.length === 0) return null;
-  const limit = opts.radius > 5000 ? 15 : opts.limit;
+  // Geniş etiket kümeleriyle çalışırken ham sonuç havuzunu büyüt ki
+  // kategori eşleşmesi ve mesafe filtrelemesinden sonra hedeflenen
+  // minimum 10 mekan yakalansın.
+  const limit = opts.radius > 5000 ? 30 : opts.limit;
   // Hafif sorgu: tek birleşik blok, ana etiketler, kısa timeout —
   // overquery/timeout riskini düşürür.
   return `[out:json][timeout:3];\n(\n${lines.join("\n")}\n);\nout center ${limit};`;
@@ -274,9 +277,9 @@ const MAX_ACCEPTABLE_DISTANCE_M = 50000;
 /** Kademeli yarıçap merdiveni: sonuç eşiğinin altındaysa sorgu bir üst
  * kademede tekrarlanır (Türkiye'nin 81 ilinde ölçeklenebilir — şehir
  * bazlı yama yok). */
-const RADIUS_TIERS_M = [15000, 30000, 50000];
+const RADIUS_TIERS_M = [20000, 35000, 50000];
 /** Bir kademede yeterli kabul edilen minimum sonuç sayısı. */
-const MIN_RESULTS_THRESHOLD = 8;
+const MIN_RESULTS_THRESHOLD = 10;
 
 export interface NearbyOptions {
   center: Coordinates;

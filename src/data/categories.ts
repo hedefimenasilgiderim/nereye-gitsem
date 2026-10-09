@@ -47,7 +47,7 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "☕",
     color: "#92400e",
     tagFilters: [
-      { amenity: ["cafe", "tea_garden", "ice_cream"] },
+      { amenity: ["cafe", "tea_garden", "ice_cream", "bistro", "fast_food"] },
       { shop: ["coffee", "pastry", "bakery"] },
     ],
   },
@@ -57,8 +57,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "🍽️",
     color: "#dc2626",
     tagFilters: [
-      { amenity: ["restaurant", "food_court"] },
-      { amenity: ["bar", "pub"] },
+      { amenity: ["restaurant", "food_court", "bistro", "bar", "pub"] },
+      { craft: ["caterer"] },
     ],
   },
   {
@@ -67,7 +67,7 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "📍",
     color: "#0d9488",
     tagFilters: [
-      { tourism: ["attraction", "artwork", "viewpoint"] },
+      { tourism: ["attraction", "artwork", "viewpoint", "museum"] },
       { historic: ["*"] },
       { leisure: ["park", "garden"] },
       { place: ["square"] },
