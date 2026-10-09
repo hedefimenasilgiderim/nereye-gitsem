@@ -24,26 +24,26 @@ import {
 const API_KEY = readApiKey();
 
 /**
- * .env'den anahtarı temiz okur: tırnak/boşluk kalıntılarını atar,
- * boş veya hatalı formatlı anahtarı eleyip konsola hata yazar.
- * Bozuk anahtar asla ağa gönderilmez (401 üretmesin diye istek atılmaz).
+ * .env / ortam değişkeninden anahtarı temiz okur: tırnak/boşluk
+ * kalıntılarını atar. Boş gelirse yalnızca uyarı yazar; bozuk anahtar
+ * asla ağa gönderilmez (401 üretmesin diye istek atılmaz).
  */
+// Tarayıcıda `process` yoktur; Vite `define` ile derleme anında gömülür.
+declare const process:
+  | { env: Record<string, string | undefined> }
+  | undefined;
+
 function readApiKey(): string | undefined {
-  const raw = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
-  if (raw == null) {
-    console.error(
-      "[gemini] VITE_GEMINI_API_KEY tanımlı değil (.env dosyasını kontrol edin).",
-    );
-    return undefined;
-  }
-  const key = raw
-    .trim()
+  const apiKey = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
+  const nodeKey =
+    typeof process !== "undefined"
+      ? (process.env.VITE_GEMINI_API_KEY || "").trim()
+      : "";
+  const key = (apiKey || nodeKey)
     .replace(/^["']|["']$/g, "")
     .trim();
   if (!key) {
-    console.error(
-      "[gemini] VITE_GEMINI_API_KEY boş okundu (.env dosyasını kontrol edin).",
-    );
+    console.warn("VITE_GEMINI_API_KEY eksik");
     return undefined;
   }
   if (!/^AIza[0-9A-Za-z_-]{30,}$/.test(key)) {
