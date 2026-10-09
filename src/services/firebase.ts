@@ -34,7 +34,7 @@ const FIREBASE_CONFIG = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
 };
 
-export const PLACES_CACHE_COLLECTION = "places_cache";
+export const PLACES_CACHE_COLLECTION = "places_cache_v132";
 
 /** Overpass'ten gelen gerçek verinin önbellek süresi. */
 export const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 gün

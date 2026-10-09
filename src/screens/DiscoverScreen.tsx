@@ -69,6 +69,15 @@ export function DiscoverScreen() {
       .then((result) => {
         if (cancelled) return;
         let list = result.places;
+
+        // SON SAVUNMA HATTI: UI'a gelmeden önce mekanların kategorisi
+        // seçili kategoriyle %100 eşleşmiyorsa listeden kes. Eski/bozuk
+        // cache veya yanlış tag'li Overpass sonuçları burada süzülür.
+        if (activeFilter?.categoryIds?.length) {
+          const allowed = new Set(activeFilter.categoryIds);
+          list = list.filter((p) => allowed.has(p.categoryId));
+        }
+
         if (activeFilter?.preferFree) {
           list = list.filter((p) => p.tags.fee !== "yes" && !p.tags.charge);
         }
