@@ -46,8 +46,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "☕",
     color: "#92400e",
     tagFilters: [
-      { amenity: ["cafe", "fast_food", "bistro"] },
-      { shop: ["coffee", "bakery", "pastry", "confectionery"] },
+      { amenity: ["cafe", "tea_garden"] },
+      { shop: ["coffee", "pastry"] },
     ],
   },
   {

@@ -669,45 +669,11 @@ function haversine(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-/** Kullanıcıya en az bu kadar kaliteli mekan gösterilir (asla boş ekran yok). */
-const MIN_RESULTS = 6;
-
 /**
- * Merkezin bulunduğu ili tahmin eder: en yakın acil durum kaydının şehri.
- * Böylece "il genelinden öneri" mantığı harita bilgisi olmadan çalışır.
- */
-function inferProvince(center: Coordinates): string | null {
-  let best: { city: string; d: number } | null = null;
-  for (const p of FALLBACK_PLACES) {
-    const d = haversine(center, { lat: p.latitude, lon: p.longitude });
-    const city = p.city ?? null;
-    if (!city) continue;
-    if (!best || d < best.d) best = { city, d };
-  }
-  return best?.city ?? null;
-}
-
-function dedupeByPlaceId(places: Place[]): Place[] {
-  const seen = new Set<string>();
-  return places.filter((p) => {
-    if (seen.has(p.placeId)) return false;
-    seen.add(p.placeId);
-    return true;
-  });
-}
-
-/**
- * Kademeli acil durum filtresi — kullanıcıya ASLA boş ekran gösterilmez:
- *
- * 1. KATI: seçili kategori + 20 km mesafe sınırı (Başiskele'de İstanbul
- *    mekanı görünmez).
- * 2. İL GENELİ: katı sonuç 6'dan azsa, merkezin ili tahmin edilir ve o
- *    ildeki aynı kategoriye ait, 20 km SINIRINI AŞMAYAN kayıtlar eklenir.
- * 3. EN YAKIN KATEGORİ: hâlâ 6'dan azsa, aynı kategorinin merkeze en
- *    yakın (20 km içinde) kayıtları listeye eklenir.
- *
- * Kategori filtresi her kademede KESİN uygulanır — başka kategorinin
- * mekanları asla karıştırılmaz.
+ * KESİN kategori acil durum filtresi. Kullanıcı hangi kategoriyi
+ * seçtiyse YALNIZCA o kategoriye ait mekanlar döner. "Listeyi
+ * doldurmak için başka kategori yapıştırma" KESİNLİKLE YAPILMAZ.
+ * 20 km mesafe sınırı da uygulanır; uzak şehirler asla görünmez.
  */
 export function filterFallbackPlaces(opts: {
   center?: Coordinates;
@@ -715,57 +681,20 @@ export function filterFallbackPlaces(opts: {
   limit?: number;
 }): Place[] {
   const limit = opts.limit ?? 20;
-  const byCategory = (list: Place[]) =>
-    opts.categoryIds?.length
-      ? list.filter((p) => opts.categoryIds!.includes(p.categoryId))
-      : list;
-  const withinRadius = (p: Place) =>
-    !opts.center ||
-    haversine(opts.center, { lat: p.latitude, lon: p.longitude }) <=
-      MAX_FALLBACK_DISTANCE_M;
 
-  // 1. Katı: kategori + 20 km.
-  let result = FALLBACK_PLACES.filter(withinRadius);
-  if (!opts.center) result = FALLBACK_PLACES;
-  result = byCategory(result);
-  if (result.length >= MIN_RESULTS) return result.slice(0, limit);
+  let list = FALLBACK_PLACES.filter((p) => {
+    if (!opts.center) return true;
+    return (
+      haversine(opts.center, { lat: p.latitude, lon: p.longitude }) <=
+      MAX_FALLBACK_DISTANCE_M
+    );
+  });
 
-  if (!opts.center) return result.slice(0, limit);
-
-  // 2. İl geneli: aynı ildeki aynı kategori kayıtları, YİNE 20 km'de.
-  const province = inferProvince(opts.center);
-  if (province) {
-    const provList = byCategory(
-      FALLBACK_PLACES.filter((p) => p.city === province),
-    ).filter(withinRadius);
-    result = dedupeByPlaceId([...result, ...provList]);
-    if (result.length >= MIN_RESULTS) return result.slice(0, limit);
+  if (opts.categoryIds?.length) {
+    list = list.filter((p) => opts.categoryIds!.includes(p.categoryId));
   }
 
-  // 3. En yakın kategori kayıtları (20 km içinde) mesafe sırasıyla tamamlanır.
-  const anyList = byCategory(FALLBACK_PLACES)
-    .filter(withinRadius)
-    .slice()
-    .sort(
-      (a, b) =>
-        haversine(opts.center!, { lat: a.latitude, lon: a.longitude }) -
-        haversine(opts.center!, { lat: b.latitude, lon: b.longitude }),
-    );
-  result = dedupeByPlaceId([...result, ...anyList]);
-  if (result.length >= MIN_RESULTS) return result.slice(0, limit);
-
-  // 4. SON GÜVENCE: seçili kategori çok seyrekse (örn. Başiskele'de
-  // "Etkinlik"), 20 km içindeki EN YAKIN mekanları (kategori farkı
-  // gözetmeksizin) göster. Ekran asla boş kalmaz.
-  const nearestAny = FALLBACK_PLACES.filter(withinRadius)
-    .slice()
-    .sort(
-      (a, b) =>
-        haversine(opts.center!, { lat: a.latitude, lon: a.longitude }) -
-        haversine(opts.center!, { lat: b.latitude, lon: b.longitude }),
-    );
-  result = dedupeByPlaceId([...result, ...nearestAny]);
-  return result.slice(0, limit);
+  return list.slice(0, limit);
 }
 
 /** Kullanıcı konumuna göre acil durum listesini mesafeye göre sıralar. */

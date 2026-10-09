@@ -376,6 +376,12 @@ async function getNearbyPlacesInternal(
     for (const el of elements) {
       const place = elementToPlace(el, center);
       if (!place || seen.has(place.placeId)) continue;
+      // Savunma: Overpass'ten dönen mekanın kategorisi seçili
+      // kategoriyle uyuşmuyorsa listeye alma (örn. AVM tag'li bir yer
+      // Kafe sorgusuna karışmasın).
+      if (opts.categoryIds?.length && !opts.categoryIds.includes(place.categoryId)) {
+        continue;
+      }
       seen.add(place.placeId);
       places.push(place);
     }
