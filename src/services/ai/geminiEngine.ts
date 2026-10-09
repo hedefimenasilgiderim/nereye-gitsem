@@ -21,7 +21,7 @@ import {
   type AIResponse,
 } from "./types";
 
-const API_KEY = readApiKey();
+const cleanApiKey = readApiKey();
 
 // Tarayıcıda `process` yoktur; Vite `define` ile derleme anında gömülür.
 // Bildirim yalnızca tsc içindir.
@@ -30,23 +30,25 @@ declare const process:
   | undefined;
 
 /**
- * Anahtarı çift kaynaktan okur (önce Vite, yedek Node/process).
- * Boş gelse bile çağrıyı engellemez; yalnızca konsola hata yazar ve
- * istek denenir (401/403 olursa kullanıcıya açıklayıcı hata gösterilir).
+ * Anahtarı katı şekilde temizler: çift kaynaktan okur, çevreleyen
+ * tırnakları söker, kırpar. Değerin kendisi asla loglanmaz, yalnızca
+ * uzunluğu yazılır. Boş gelse bile çağrı engellenmez; kimlik hatası
+ * kullanıcıya açıklayıcı mesaj olarak gösterilir.
  */
 function readApiKey(): string {
-  const apiKey = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
-  const nodeKey =
-    typeof process !== "undefined"
-      ? (process.env.VITE_GEMINI_API_KEY || "").trim()
-      : "";
-  const key = (apiKey || nodeKey)
-    .replace(/^["']|["']$/g, "")
-    .trim();
-  if (!key) {
+  // Not: `process.env...` ifadesi Vite `define` ile derleme anında
+  // gerçek değerle değiştirilir; `typeof` koruması yalnızca tanımsız
+  // ortamlarda (tsc dahil) güvenli okuma içindir.
+  const rawKey =
+    import.meta.env.VITE_GEMINI_API_KEY ||
+    (typeof process !== "undefined" ? process.env.VITE_GEMINI_API_KEY : undefined) ||
+    "";
+  const cleanApiKey = rawKey.replace(/^["']|["']$/g, "").trim();
+  console.log("Gemini Key Length:", cleanApiKey.length);
+  if (!cleanApiKey) {
     console.error("Gemini Key Missing");
   }
-  return key;
+  return cleanApiKey;
 }
 const MODEL = "gemini-flash-latest";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
@@ -113,13 +115,11 @@ ${buildCandidateBlock(candidates.map((c) => c.place))}`
     parts: [{ text: `${contextLines}\n\nKullanıcının sorusu: ${req.query}` }],
   });
 
-  // Anahtar URL yerine başlıkla gider (Google'ın önerdiği yöntem):
-  // URL kodlama/bozulma sınıfı hataları ve log'lara anahtar sızması engellenir.
-  const res = await fetch(ENDPOINT, {
+  // Anahtar URL parametresiyle, kodlanmış ve tırnaksız gider.
+  const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(cleanApiKey)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": API_KEY,
     },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
