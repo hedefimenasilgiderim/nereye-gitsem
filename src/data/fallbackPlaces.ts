@@ -963,7 +963,7 @@ export const FALLBACK_PLACES: Place[] = [
  * Acil durum verisi için mesafe sınırı: seçilen merkezden daha uzaktaki
  * (örn. başka şehirdeki) mekanlar ASLA gösterilmez.
  */
-export const MAX_FALLBACK_DISTANCE_M = 35000;
+export const MAX_FALLBACK_DISTANCE_M = 50000;
 
 /** Küçük haversine (osm.ts ile döngüsel import yaratmamak için burada). */
 function haversine(

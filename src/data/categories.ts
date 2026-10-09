@@ -34,10 +34,11 @@ export const CATEGORIES: CategoryDef[] = [
     color: "#0284c7",
     tagFilters: [
       { natural: ["beach"] },
-      { leisure: ["beach_resort", "marina", "park"] },
+      { leisure: ["beach_resort", "marina", "park", "water_park"] },
       { man_made: ["pier"] },
       { tourism: ["viewpoint"] },
       { amenity: ["cafe"] },
+      { waterway: ["riverbank"] },
     ],
   },
   {
@@ -46,8 +47,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "☕",
     color: "#92400e",
     tagFilters: [
-      { amenity: ["cafe", "tea_garden"] },
-      { shop: ["coffee", "pastry"] },
+      { amenity: ["cafe", "tea_garden", "ice_cream"] },
+      { shop: ["coffee", "pastry", "bakery"] },
     ],
   },
   {
@@ -111,7 +112,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: "#4f46e5",
     tagFilters: [
       { amenity: ["cinema", "theatre", "nightclub", "arts_centre"] },
-      { leisure: ["amusement_arcade", "escape_game", "bowling_alley", "water_park"] },
+      { leisure: ["amusement_arcade", "escape_game", "bowling_alley", "water_park", "theme_park", "sports_centre"] },
       { tourism: ["theme_park"] },
       { sport: ["karting"] },
     ],
@@ -121,12 +122,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: "Fotoğraf Noktaları",
     emoji: "📸",
     color: "#c026d3",
-    // Manzara seyir terasları, tarihi yapılar, anıtlar, sahil ve otantik
-    // noktalar.
+    // Manzara seyir terasları, tarihi yapılar, anıtlar, zirveler,
+    // şelaleler, sahil ve otantik noktalar.
     tagFilters: [
       { tourism: ["viewpoint", "artwork"] },
       { historic: ["monument", "memorial", "castle", "ruins"] },
-      { natural: ["beach"] },
+      { natural: ["beach", "peak", "waterfall"] },
     ],
   },
 ];

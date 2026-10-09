@@ -235,8 +235,8 @@ function buildAroundQuery(opts: {
     ? CATEGORIES.filter((c) => opts.categoryIds!.includes(c.id))
     : CATEGORIES;
   const lines: string[] = [];
-  // WAF/timeout koruması: yarıçap en fazla 35 km.
-  const cappedRadius = Math.min(Math.round(opts.radius), 35000);
+  // WAF/timeout koruması: yarıçap en fazla 50 km.
+  const cappedRadius = Math.min(Math.round(opts.radius), 50000);
   const around = `(around:${cappedRadius},${opts.center.lat},${opts.center.lon})`;
 
   for (const cat of cats) {
@@ -269,7 +269,14 @@ function buildAroundQuery(opts: {
 
 /** Maksimum kabul edilebilir mesafe (metre). Bu değerden uzak mekanlar
  * cache, Overpass veya fallback'den gelse bile asla gösterilmez. */
-const MAX_ACCEPTABLE_DISTANCE_M = 35000;
+const MAX_ACCEPTABLE_DISTANCE_M = 50000;
+
+/** Kademeli yarıçap merdiveni: sonuç eşiğinin altındaysa sorgu bir üst
+ * kademede tekrarlanır (Türkiye'nin 81 ilinde ölçeklenebilir — şehir
+ * bazlı yama yok). */
+const RADIUS_TIERS_M = [15000, 30000, 50000];
+/** Bir kademede yeterli kabul edilen minimum sonuç sayısı. */
+const MIN_RESULTS_THRESHOLD = 8;
 
 export interface NearbyOptions {
   center: Coordinates;
@@ -407,21 +414,34 @@ async function getNearbyPlacesInternal(
   if (!ql) throw new NoSourceError();
 
   try {
-    // Cache miss: Overpass'e SADECE TEK istek atılır.
-    const elements = await queryOverpass(ql);
+    // Kademeli yarıçap: 15 km'den başlar, sonuç eşiğin (8) altındaysa
+    // 30 km, sonra 50 km ile tekrar dener. Her kademe TEK istektir
+    // (paralel istek yok); eşik yakalanınca durur.
     const seen = new Set<string>();
     const places: Place[] = [];
-    for (const el of elements) {
-      const place = elementToPlace(el, center, opts.categoryIds);
-      if (!place || seen.has(place.placeId)) continue;
-      // Savunma: Overpass'ten dönen mekanın kategorisi seçili
-      // kategoriyle uyuşmuyorsa listeye alma (örn. AVM tag'li bir yer
-      // Kafe sorgusuna karışmasın).
-      if (opts.categoryIds?.length && !opts.categoryIds.includes(place.categoryId)) {
-        continue;
+    for (const tier of RADIUS_TIERS_M) {
+      const tierQl = buildAroundQuery({ center, radius: tier, categoryIds: opts.categoryIds, limit });
+      if (!tierQl) break;
+      try {
+        const elements = await queryOverpass(tierQl);
+        for (const el of elements) {
+          const place = elementToPlace(el, center, opts.categoryIds);
+          if (!place || seen.has(place.placeId)) continue;
+          // Savunma: Overpass'ten dönen mekanın kategorisi seçili
+          // kategoriyle uyuşmuyorsa listeye alma (örn. AVM tag'li bir
+          // yer Kafe sorgusuna karışmasın).
+          if (opts.categoryIds?.length && !opts.categoryIds.includes(place.categoryId)) {
+            continue;
+          }
+          seen.add(place.placeId);
+          places.push(place);
+        }
+      } catch {
+        // Bu kademede patladı: bir üst kademe yoksa fallback'e düşülür.
+        break;
       }
-      seen.add(place.placeId);
-      places.push(place);
+      const soFar = clampByDistance(places, center);
+      if (soFar.length >= MIN_RESULTS_THRESHOLD) break;
     }
 
     const valid = clampByDistance(places, center);
