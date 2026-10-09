@@ -498,10 +498,9 @@ function dedupeByPlaceId(places: Place[]): Place[] {
  * 1. KATI: seçili kategori + 20 km mesafe sınırı (Başiskele'de İstanbul
  *    mekanı görünmez).
  * 2. İL GENELİ: katı sonuç 6'dan azsa, merkezin ili tahmin edilir ve o
- *    ildeki aynı kategoriye ait tüm kayıtlar eklenir (örn. Başiskele →
- *    Kocaeli geneli: Gebze Center, Seka Park...).
+ *    ildeki aynı kategoriye ait, 20 km SINIRINI AŞMAYAN kayıtlar eklenir.
  * 3. EN YAKIN KATEGORİ: hâlâ 6'dan azsa, aynı kategorinin merkeze en
- *    yakın kayıtları (başka ilden olsa bile) listeye eklenir.
+ *    yakın (20 km içinde) kayıtları listeye eklenir.
  *
  * Kategori filtresi her kademede KESİN uygulanır — başka kategorinin
  * mekanları asla karıştırılmaz.
@@ -516,37 +515,38 @@ export function filterFallbackPlaces(opts: {
     opts.categoryIds?.length
       ? list.filter((p) => opts.categoryIds!.includes(p.categoryId))
       : list;
+  const withinRadius = (p: Place) =>
+    !opts.center ||
+    haversine(opts.center, { lat: p.latitude, lon: p.longitude }) <=
+      MAX_FALLBACK_DISTANCE_M;
 
   // 1. Katı: kategori + 20 km.
-  let result = FALLBACK_PLACES.filter(
-    (p) =>
-      haversine(opts.center ?? { lat: 0, lon: 0 }, {
-        lat: p.latitude,
-        lon: p.longitude,
-      }) <= MAX_FALLBACK_DISTANCE_M,
-  );
+  let result = FALLBACK_PLACES.filter(withinRadius);
   if (!opts.center) result = FALLBACK_PLACES;
   result = byCategory(result);
   if (result.length >= MIN_RESULTS) return result.slice(0, limit);
 
   if (!opts.center) return result.slice(0, limit);
 
-  // 2. İl geneli: aynı ildeki aynı kategori kayıtları.
+  // 2. İl geneli: aynı ildeki aynı kategori kayıtları, YİNE 20 km'de.
   const province = inferProvince(opts.center);
   if (province) {
     const provList = byCategory(
       FALLBACK_PLACES.filter((p) => p.city === province),
-    );
+    ).filter(withinRadius);
     result = dedupeByPlaceId([...result, ...provList]);
     if (result.length >= MIN_RESULTS) return result.slice(0, limit);
   }
 
-  // 3. En yakın kategori kayıtları: mesafe sırasıyla tamamlanır.
-  const anyList = byCategory(FALLBACK_PLACES).slice().sort(
-    (a, b) =>
-      haversine(opts.center!, { lat: a.latitude, lon: a.longitude }) -
-      haversine(opts.center!, { lat: b.latitude, lon: b.longitude }),
-  );
+  // 3. En yakın kategori kayıtları (20 km içinde) mesafe sırasıyla tamamlanır.
+  const anyList = byCategory(FALLBACK_PLACES)
+    .filter(withinRadius)
+    .slice()
+    .sort(
+      (a, b) =>
+        haversine(opts.center!, { lat: a.latitude, lon: a.longitude }) -
+        haversine(opts.center!, { lat: b.latitude, lon: b.longitude }),
+    );
   result = dedupeByPlaceId([...result, ...anyList]);
   return result.slice(0, limit);
 }

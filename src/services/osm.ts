@@ -66,18 +66,17 @@ async function queryOverpass(ql: string): Promise<OverpassElement[]> {
   try {
     const res = await fetch(PRIMARY_OVERPASS, {
       method: "POST",
-      // WAF-proof: sadece zorunlu header. Accept/User-Agent gibi
-      // içerik uzlaşma başlıkları 406'ya yol açabildiği için gönderilmez.
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "data=" + encodeURIComponent(query),
       signal: controller.signal,
     });
-    // Overpass yoğunlukta XML/HTML hata sayfası döndürebilir; text okuyup
-    // parse etmeyi dene (JSON dışı yanıt patlamasın). Hata yoksa sessizce
-    // çağıran katman yerel veriye düşer — konsol kirletilmez.
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (JSON.parse(text) as OverpassResponse).elements ?? [];
+  } catch {
+    // Tüm ağ/HTTP/parse hataları sessizce yutulur; çağıran yerel veriye düşer.
+    // Console'da unhandled 500/406/504 stack trace görünmez.
+    throw new Error("overpass-failed");
   } finally {
     clearTimeout(timer);
   }
@@ -245,6 +244,10 @@ function buildAroundQuery(opts: {
   return `[out:json][timeout:3];\n(\n${lines.join("\n")}\n);\nout center ${limit};`;
 }
 
+/** Maksimum kabul edilebilir mesafe (metre). Bu değerden uzak mekanlar
+ * cache, Overpass veya fallback'den gelse bile asla gösterilmez. */
+const MAX_ACCEPTABLE_DISTANCE_M = 20000;
+
 export interface NearbyOptions {
   center: Coordinates;
   radius?: number;
@@ -274,9 +277,21 @@ export interface NearbyResult {
   places: Place[];
 }
 
+/** Verilen merkeze 20 km'den uzak mekanları SERT şekilde siler. */
+function clampByDistance(
+  places: Place[],
+  center: Coordinates,
+  maxMeters = MAX_ACCEPTABLE_DISTANCE_M,
+): Place[] {
+  return places.filter((p) => {
+    const d = haversineMeters(center, { lat: p.latitude, lon: p.longitude });
+    return d <= maxMeters;
+  });
+}
+
 export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult> {
   const { center } = opts;
-  const radius = opts.radius ?? 4000;
+  const radius = Math.min(opts.radius ?? 4000, MAX_ACCEPTABLE_DISTANCE_M);
   const limit = opts.limit ?? 80;
 
   if (opts.categoryIds) {
@@ -309,9 +324,14 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
     docId = fb.placeCacheDocId(cityKey, categoryId);
     const cachedPlaces = await fb.readPlaceCache(docId);
     if (cachedPlaces && cachedPlaces.length > 0) {
-      return {
-        places: sortFallbackByDistance(cachedPlaces, center, haversineMeters),
-      };
+      // Önbellekteki eski/kötü kayıtları (20 km+) SERT şekilde siler.
+      const valid = clampByDistance(cachedPlaces, center);
+      if (valid.length > 0) {
+        return {
+          places: sortFallbackByDistance(valid, center, haversineMeters),
+        };
+      }
+      // Cache tamamen geçersizse; tekrar Overpass'ten doldurulur.
     }
   } catch {
     /* Firebase yok/erişilemez: Overpass → yerel veri akışıyla devam */
@@ -332,7 +352,10 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
       places.push(place);
     }
 
-    if (places.length === 0) {
+    // Overpass sonuçları da 20 km'den uzaksa filtrelenir.
+    const valid = clampByDistance(places, center);
+
+    if (valid.length === 0) {
       // Ağ çalıştı ama kayıt dönmedi: yerel kategorik veri gösterilir ve
       // kısa TTL ile önbelleğe yazılır (gerçek veri sonra üzerine yazar).
       const local = localPlaces();
@@ -348,15 +371,15 @@ export async function getNearbyPlaces(opts: NearbyOptions): Promise<NearbyResult
 
     // Read-through: sonuçlar Firestore'a yazılır; sonraki kullanıcılar
     // bu veriyi milisaniyeler içinde alır.
-    places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+    valid.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
     if (docId) {
       void loadFirebaseCache()
-        .then((fb) => fb.writePlaceCache(docId!, places, "overpass"))
+        .then((fb) => fb.writePlaceCache(docId!, valid, "overpass"))
         .catch(() => {});
     }
-    return { places };
+    return { places: valid };
   } catch {
-    // Overpass patladı / 2,5 sn zaman aşımı: hata ekranı YOK. Yerel
+    // Overpass patladı / zaman aşımı: hata ekranı YOK. Yerel
     // kategorik veri hem ekrana basılır hem önbelleğe yazılır.
     const local = localPlaces();
     if (docId) {
