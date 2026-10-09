@@ -8,12 +8,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigation } from "../app/navigation";
 import { useAppState } from "../app/state";
 import { CATEGORIES } from "../data/categories";
-import { DISCOVERY_MODES } from "../data/modes";
 import { CITIES } from "../data/cities";
 import { getNearbyPlaces } from "../services/osm";
 import type { Place } from "../models/types";
 import { PlaceCard } from "../components/PlaceCard";
-import { EmptyState, LoadingBlock, SkeletonList } from "../components/states";
+import { EmptyState, SkeletonList } from "../components/states";
 
 export function DiscoverScreen() {
   const nav = useNavigation();
@@ -56,7 +55,8 @@ export function DiscoverScreen() {
     let cancelled = false;
     setState("loading");
 
-    const radius = activeFilter ? 12000 : location.status === "granted" ? 4000 : 8000;
+    // Kapsama alanı: 35 km — Kartepe, Sapanca, Gölcük, İzmit dahil.
+    const radius = 35000;
     getNearbyPlaces({
       center,
       radius,
@@ -73,7 +73,8 @@ export function DiscoverScreen() {
         // SON SAVUNMA HATTI: UI'a gelmeden önce mekanların kategorisi
         // seçili kategoriyle %100 eşleşmiyorsa listeden kes. Eski/bozuk
         // cache veya yanlış tag'li Overpass sonuçları burada süzülür.
-        if (activeFilter?.categoryIds?.length) {
+        // (broadened sonuçlar bölgesel popüler mekanlardır; filtre uygulanmaz)
+        if (!result.broadened && activeFilter?.categoryIds?.length) {
           const allowed = new Set(activeFilter.categoryIds);
           list = list.filter((p) => allowed.has(p.categoryId));
         }
@@ -190,48 +191,6 @@ export function DiscoverScreen() {
           </div>
         </section>
 
-        {/* Keşif modları */}
-        <section className="mt-5">
-          <h2 className="mb-2 text-sm font-bold text-ink-soft">
-            Bugün nasıl bir yer istiyorsun?
-          </h2>
-          <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-            {DISCOVERY_MODES.map((mode) => {
-              const active = activeFilter?.label === mode.label;
-              return (
-                <button
-                  key={mode.id}
-                  onClick={() =>
-                    setActiveFilter(
-                      active
-                        ? null
-                        : {
-                            label: mode.label,
-                            categoryIds: mode.categoryIds,
-                            preferFree: mode.preferFree,
-                          },
-                    )
-                  }
-                  className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition active:scale-95 ${
-                    active
-                      ? "bg-accent text-white"
-                      : "bg-surface text-ink-soft shadow-[0_1px_2px_rgba(15,23,42,0.05)]"
-                  }`}
-                >
-                  <span>{mode.emoji}</span>
-                  {mode.label}
-                </button>
-              );
-            })}
-          </div>
-          {activeFilter && (
-            <p className="mt-2 text-xs text-muted">
-              <strong>{activeFilter.label}</strong> için sonuçlar · temizlemek
-              için tekrar dokun
-            </p>
-          )}
-        </section>
-
         {/* Yakındaki / şehirdeki yerler */}
         <section className="mt-5">
           <div className="mb-2 flex items-baseline justify-between">
@@ -274,23 +233,15 @@ export function DiscoverScreen() {
           ) : state === "loading" ? (
             <SkeletonList rows={4} />
           ) : places.length === 0 ? (
-            <EmptyState
-              emoji="🧭"
-              title={
-                activeFilter
-                  ? `${activeFilter.label} için şimdilik öneri yok`
-                  : "Şimdilik burada öneri yok"
-              }
-              description="Kaynaklar birazdan güncellenebilir; tekrar denemek için dokun."
-              action={
-                <button
-                  onClick={() => setReloadKey((k) => k + 1)}
-                  className="mt-3 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white active:scale-95"
-                >
-                  Yenile
-                </button>
-              }
-            />
+            // "Öneri yok" ekranı yasak: sadece sessiz yenileme opsiyonu.
+            <div className="flex justify-center py-6">
+              <button
+                onClick={() => setReloadKey((k) => k + 1)}
+                className="rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white active:scale-95"
+              >
+                Yenile
+              </button>
+            </div>
           ) : (
             <div className="space-y-3">
               {places.slice(0, 12).map((place) => (

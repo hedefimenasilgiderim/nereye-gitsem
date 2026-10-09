@@ -111,7 +111,9 @@ export const CATEGORIES: CategoryDef[] = [
     color: "#4f46e5",
     tagFilters: [
       { amenity: ["cinema", "theatre", "nightclub", "arts_centre"] },
-      { leisure: ["amusement_arcade", "escape_game", "bowling_alley"] },
+      { leisure: ["amusement_arcade", "escape_game", "bowling_alley", "water_park"] },
+      { tourism: ["theme_park"] },
+      { sport: ["karting"] },
     ],
   },
   {
@@ -120,8 +122,8 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: "👨‍👩‍👧",
     color: "#0891b2",
     tagFilters: [
-      { tourism: ["zoo", "aquarium", "museum"] },
-      { leisure: ["playground", "water_park"] },
+      { tourism: ["zoo", "aquarium", "museum", "picnic_site"] },
+      { leisure: ["playground", "water_park", "bird_hide"] },
     ],
   },
   {

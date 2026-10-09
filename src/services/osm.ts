@@ -12,6 +12,7 @@ import type { Coordinates, Place, PlaceRef } from "../models/types";
 import { CATEGORIES } from "../data/categories";
 import {
   filterFallbackPlaces,
+  popularRegionalPlaces,
   sortFallbackByDistance,
 } from "../data/fallbackPlaces";
 import { cached, cachedWithStale } from "./cache";
@@ -107,6 +108,28 @@ export function categorize(tags: Record<string, string>): string | null {
   return null;
 }
 
+/**
+ * Sorgu kategorisi bilinçli bir seçim olduğundan, eşleştirmede ÖNCE
+ * sorgulanan kategorilerin filtreleri denenir (örn. "Etkinlik" sekmesinde
+ * bir sinema "event" olarak işaretlenir; "Eğlence" sekmesinde aynı
+ * mekan "entertainment" olur). Böylece sekme bazlı sonuç listeleri
+ * kendi sorgusundan gelen mekanları kaybetmez.
+ */
+function categorizeFor(
+  tags: Record<string, string>,
+  categoryIds?: string[],
+): string | null {
+  if (categoryIds?.length) {
+    for (const id of categoryIds) {
+      const cat = CATEGORIES.find((c) => c.id === id);
+      if (cat && cat.tagFilters.some((f) => tagFilterMatches(tags, f))) {
+        return id;
+      }
+    }
+  }
+  return categorize(tags);
+}
+
 // ------------------------------------------------------------ Geometri
 
 export function haversineMeters(
@@ -152,6 +175,7 @@ function extractImages(tags: Record<string, string>): string[] {
 function elementToPlace(
   el: OverpassElement,
   origin?: Coordinates,
+  preferredCategoryIds?: string[],
 ): Place | null {
   const tags = el.tags ?? {};
   const name = tags.name ?? tags["name:tr"];
@@ -161,7 +185,7 @@ function elementToPlace(
   const lon = el.lon ?? el.center?.lon;
   if (lat === undefined || lon === undefined) return null;
 
-  const categoryId = categorize(tags);
+  const categoryId = categorizeFor(tags, preferredCategoryIds);
   if (!categoryId) return null;
 
   const priceParts: string[] = [];
@@ -274,6 +298,12 @@ export class NoSourceError extends Error {
 
 export interface NearbyResult {
   places: Place[];
+  /**
+   * true ise sonuçlar seçili kategori yerine bölgenin popüler mekanları
+   * genişletilerek geldi (kategori içinde 0 sonuç durumu). UI bu durumda
+   * katı kategori filtresi uygulamaz — "öneri yok" ekranı asla çıkmaz.
+   */
+  broadened?: boolean;
 }
 
 /** Verilen merkeze 20 km'den uzak mekanları SERT şekilde siler. */
@@ -347,6 +377,15 @@ async function getNearbyPlacesInternal(
       haversineMeters,
     );
 
+  // Bölgesel popüler mekanlar: seçili kategoride 0 sonuç olduğunda
+  // "öneri yok" yerine gösterilen son güvence listesi.
+  const regionalPopular = () =>
+    sortFallbackByDistance(
+      popularRegionalPlaces({ center, limit }),
+      center,
+      haversineMeters,
+    );
+
   // Cache-first: Firestore'da veri varsa Overpass'e HİÇBİR istek atılmaz.
   if (docId) {
     try {
@@ -373,7 +412,7 @@ async function getNearbyPlacesInternal(
     const seen = new Set<string>();
     const places: Place[] = [];
     for (const el of elements) {
-      const place = elementToPlace(el, center);
+      const place = elementToPlace(el, center, opts.categoryIds);
       if (!place || seen.has(place.placeId)) continue;
       // Savunma: Overpass'ten dönen mekanın kategorisi seçili
       // kategoriyle uyuşmuyorsa listeye alma (örn. AVM tag'li bir yer
@@ -388,11 +427,16 @@ async function getNearbyPlacesInternal(
     const valid = clampByDistance(places, center);
 
     if (valid.length === 0) {
+      // Kategori içinde kayıt yok: önce katı kategorik yerel veri;
+      // o da boşsa bölgenin popüler mekanları. "Öneri yok" ASLA yok.
       const local = localPlaces();
+      const resultPlaces =
+        local.length > 0 ? local : regionalPopular();
+      const broadened = local.length === 0;
       if (docId) {
-        void fb?.writePlaceCache(docId, local, "fallback", fb.FALLBACK_CACHE_TTL_MS).catch(() => {});
+        void fb?.writePlaceCache(docId, resultPlaces, "fallback", fb.FALLBACK_CACHE_TTL_MS).catch(() => {});
       }
-      return { places: local };
+      return broadened ? { places: resultPlaces, broadened: true } : { places: resultPlaces };
     }
 
     valid.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
@@ -401,11 +445,20 @@ async function getNearbyPlacesInternal(
     }
     return { places: valid };
   } catch {
+    // Overpass patladı / zaman aşımı: hata ekranı YOK. Önce kategorik
+    // yerel veri; o da boşsa bölgesel popüler mekanlar.
     const local = localPlaces();
-    if (docId) {
-      void fb?.writePlaceCache(docId, local, "fallback", fb.FALLBACK_CACHE_TTL_MS).catch(() => {});
+    if (local.length > 0) {
+      if (docId) {
+        void fb?.writePlaceCache(docId, local, "fallback", fb.FALLBACK_CACHE_TTL_MS).catch(() => {});
+      }
+      return { places: local };
     }
-    return { places: local };
+    const popular = regionalPopular();
+    if (docId) {
+      void fb?.writePlaceCache(docId, popular, "fallback", fb.FALLBACK_CACHE_TTL_MS).catch(() => {});
+    }
+    return { places: popular, broadened: true };
   }
 }
 

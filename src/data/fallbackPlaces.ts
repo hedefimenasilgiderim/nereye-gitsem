@@ -322,6 +322,78 @@ export const FALLBACK_PLACES: Place[] = [
     tags: {},
   },
   {
+    placeId: "local:karatepe-kayak-merkezi",
+    name: "Kartepe Kayak Merkezi",
+    latitude: 40.7923,
+    longitude: 30.1694,
+    categoryId: "attraction",
+    city: "Kocaeli",
+    district: "Kartepe",
+    description: "Kartepe'nin zirvesinde, kışın kayak yazın manzara ve doğa yürüyüşü merkezi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:ormanya-dogal-yasam",
+    name: "Ormanya Doğal Yaşam Parkı",
+    latitude: 40.7742,
+    longitude: 29.4105,
+    categoryId: "family",
+    city: "Kocaeli",
+    district: "Darıca",
+    description: "Yaban hayvanları, gölet ve oyun alanlarıyla büyük doğal yaşam parkı.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:golcuk-sahil",
+    name: "Gölcük Sahil",
+    latitude: 40.7175,
+    longitude: 29.2809,
+    categoryId: "nature",
+    city: "Kocaeli",
+    district: "Gölcük",
+    description: "İzmit Körfezi kıyısında yürüyüş ve dinlenme sahil bandı.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:kocaeli-kongre-merkezi",
+    name: "Kocaeli Kongre Merkezi",
+    latitude: 40.7587,
+    longitude: 29.8866,
+    categoryId: "event",
+    city: "Kocaeli",
+    district: "İzmit",
+    description: "Sekapark yakınında konser, fuar ve etkinlik kompleksi.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:sabanci-kultur-merkezi",
+    name: "Sabancı Kültür Merkezi",
+    latitude: 40.7641,
+    longitude: 29.9162,
+    categoryId: "event",
+    city: "Kocaeli",
+    district: "İzmit",
+    description: "İzmit merkezde tiyatro, konser ve gösteri salonları.",
+    images: [],
+    tags: {},
+  },
+  {
+    placeId: "local:kocaeli-bilim-merkezi",
+    name: "Kocaeli Bilim Merkezi",
+    latitude: 40.7615,
+    longitude: 29.8945,
+    categoryId: "family",
+    city: "Kocaeli",
+    district: "İzmit",
+    description: "Sekapark içinde interaktif deney istasyonlarıyla bilim müzesi.",
+    images: [],
+    tags: {},
+  },
+  {
     placeId: "local:gulhane-parki",
     name: "Gülhane Parkı",
     latitude: 41.0166,
@@ -694,6 +766,27 @@ export function filterFallbackPlaces(opts: {
     list = list.filter((p) => opts.categoryIds!.includes(p.categoryId));
   }
 
+  return list.slice(0, limit);
+}
+
+/**
+ * Bölgesel popüler mekanlar: seçili kategoride 0 sonuç olduğunda
+ * "öneri yok" ekranı yerine gösterilen son güvence. Merkez 35 km
+ * içindeki bilinen popüler noktalar (Seka Park, Ormanya, Kartepe,
+ * Başiskele Sahil vb.) döner.
+ */
+export function popularRegionalPlaces(opts: {
+  center?: Coordinates;
+  limit?: number;
+}): Place[] {
+  const limit = opts.limit ?? 12;
+  let list = FALLBACK_PLACES.filter((p) => {
+    if (!opts.center) return true;
+    return (
+      haversine(opts.center, { lat: p.latitude, lon: p.longitude }) <=
+      MAX_FALLBACK_DISTANCE_M
+    );
+  });
   return list.slice(0, limit);
 }
 
