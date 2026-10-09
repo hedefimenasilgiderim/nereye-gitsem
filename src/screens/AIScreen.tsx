@@ -87,10 +87,7 @@ export function AIScreen() {
             location.status === "granted" ? location.city : undefined,
           selectedCity,
         },
-        history: messages
-          .filter((m) => m.role === "user")
-          .slice(-2)
-          .map((m) => ({ role: m.role, text: m.text })),
+        history: messages.slice(-20).map((m) => ({ role: m.role, text: m.text })),
       });
       setMessages((prev) => [
         ...prev,

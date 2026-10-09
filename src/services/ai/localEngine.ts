@@ -128,7 +128,14 @@ export function chitChatReply(query: string): string {
   ) {
     return "Genel bir gezi çantası için rahat ayakkabı, su/matara, powerbank, havaya göre ince bir katman ve kimlik yeterli olur. Nereye gidiyorsun? Söylersen daha net yardımcı olurum. 🙂";
   }
-  return "Sana en iyi şekilde yardımcı olabilmem için ne aradığını biraz açar mısın? Örneğin: \"Yakınımda restoran\" ya da \"İzmir'de gezilecek yerler\". 🙂";
+  // Net bir mekân isteği yoksa genel bir netleştirme sorusu sor.
+  // Tek bir ezber cümleye kilitlenmemek için kısa varyantlar dönülür.
+  const CLARIFY_VARIANTS = [
+    "Ne aradığını biraz açar mısın? 🙂 Örneğin: \"Yakınımda restoran\" ya da \"İzmir'de gezilecek yerler\".",
+    "Sana uygun bir öneri için biraz detay lazım — hangi şehirde, nasıl bir yer olsun? Örn: \"Kadıköy'de sakin bir kafe\".",
+    "Hangi şehirde ne tür bir yer arıyorsun? \"Ankara'da tarihi yerler\" gibi yazarsan hemen bakayım. 🙂",
+  ];
+  return CLARIFY_VARIANTS[query.length % CLARIFY_VARIANTS.length];
 }
 
 /** Gemini motorunun da gerçek OSM verisi çekmesi için dışa açılmıştır. */
