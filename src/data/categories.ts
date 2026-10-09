@@ -117,16 +117,6 @@ export const CATEGORIES: CategoryDef[] = [
     ],
   },
   {
-    id: "family",
-    label: "Aile",
-    emoji: "👨‍👩‍👧",
-    color: "#0891b2",
-    tagFilters: [
-      { tourism: ["zoo", "aquarium", "museum", "picnic_site"] },
-      { leisure: ["playground", "water_park", "bird_hide"] },
-    ],
-  },
-  {
     id: "photo",
     label: "Fotoğraf Noktaları",
     emoji: "📸",

@@ -61,6 +61,6 @@ export const DISCOVERY_MODES: DiscoveryModeDef[] = [
     label: "Eğlence",
     emoji: "🎮",
     description: "Eğleneceğin, vakit geçireceğin yerler",
-    categoryIds: ["entertainment", "family"],
+    categoryIds: ["entertainment"],
   },
 ];

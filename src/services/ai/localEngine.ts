@@ -43,7 +43,7 @@ const KEYWORD_MAP: Array<{
   { words: ["deniz", "plaj", "sahil", "yüzme", "yuzme", "kumsal"], categoryIds: ["beach"], modeLabel: "deniz kenarı" },
   { words: ["doğa", "doga", "yeşil", "yesil", "orman", "park", "yürüyüş", "yuruyus"], categoryIds: ["nature"], modeLabel: "doğa" },
   { words: ["eğlence", "eglence", "eğlen", "eglence", "sinema", "tiyatro", "oyun"], categoryIds: ["entertainment"], modeLabel: "eğlence" },
-  { words: ["aile", "çocuk", "cocuk", "çocukla", "cocukla"], categoryIds: ["family"], modeLabel: "aile dostu" },
+  { words: ["aile", "çocuk", "cocuk", "çocukla", "cocukla"], categoryIds: ["entertainment", "nature"], modeLabel: "aile dostu" },
   { words: ["yemek", "lokanta", "restoran", "akşam yemeği", "aksam yemegi"], categoryIds: ["restaurant"], modeLabel: "yemek" },
   { words: ["alışveriş", "alisveris", "avm", "market"], categoryIds: ["shopping"], modeLabel: "alışveriş" },
   { words: ["gezecek", "gezilecek", "gezmek", "keşfet", "kesfet", "yer arıyorum", "ne yapabilirim"], categoryIds: ["attraction", "historic", "nature"], modeLabel: "gezilecek" },
