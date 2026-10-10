@@ -50,23 +50,18 @@ function readApiKey(): string {
   }
   return cleanApiKey;
 }
-const MODEL = "gemini-1.5-flash";
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-/**
- * REST URL'yi tek noktadan kurar; model adı ve `models/` segmenti
- * doğrulanır (çift önek / slaş kayması 404 üretmesin diye).
- * Üretilen biçim TAM OLARAK:
- * `{BASE}/models/gemini-1.5-flash:{generateContent|streamGenerateContent}?key=...`
- */
-function modelUrl(
-  action: "generateContent" | "streamGenerateContent",
-  extra = "",
-): string {
-  if (MODEL !== "gemini-1.5-flash") {
-    throw new Error(`gemini-bad-model:${MODEL}`);
-  }
-  return `${API_BASE}/models/${MODEL}:${action}?key=${encodeURIComponent(cleanApiKey)}${extra}`;
+const MODEL = "gemini-2.5-flash";
+
+/** Model istemcisi (tek noktadan; URL birleştirme yok). */
+function getModel() {
+  const genAI = new GoogleGenerativeAI(cleanApiKey);
+  return genAI.getGenerativeModel({
+    model: MODEL,
+    systemInstruction: SYSTEM_PROMPT,
+    generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
+  });
 }
 
 const SYSTEM_PROMPT = `Sen Nereye Gitsem uygulamasının akıllı, samimi ve arkadaş canlısı AI Keşif Asistanısın. Kullanıcı seninle sohbet etmek istediğinde, hal hatır sorduğunda tamamen doğal bir insan gibi konuş. Yalnızca kullanıcı spesifik bir yer/mekân/gezilecek yer istediğinde lokasyon önerilerini kart yapısında sun.`;
@@ -138,22 +133,12 @@ ${buildCandidateBlock(candidates.map((c) => c.place))}`
   return contents;
 }
 
-function buildPayload(contents: GeminiContents): string {
-  return JSON.stringify({
-    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents,
-    generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
-  });
-}
-
-function mapHttpError(status: number): Error {
-  if (status === 400 || status === 401 || status === 403) {
-    return Object.assign(new Error("gemini-auth"), { status });
-  }
-  if (status === 429 || status === 503 || status >= 500) {
-    return Object.assign(new Error("gemini-busy"), { status });
-  }
-  return new Error(`gemini-error-${status}`);
+/** SDK hatasını sınıflandırır ve tam sebebini loglar. */
+function toAuthOrRethrow(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error("[gemini] çağrı hatası:", msg);
+  if (/40[013]/.test(msg)) return new Error("gemini-auth");
+  return err instanceof Error ? err : new Error("gemini-error");
 }
 
 async function callGemini(
@@ -163,59 +148,20 @@ async function callGemini(
 ): Promise<AIResponse> {
   const contents = buildContents(req, candidates, originLabel);
 
-  // Anahtar URL parametresiyle, kodlanmış ve tırnaksız gider.
-  const res = await fetch(modelUrl("generateContent"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: buildPayload(contents),
-  });
-
-  if (!res.ok) throw mapHttpError(res.status);
-
-  const data = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text =
-    data.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text ?? "")
-      .join("")
-      .trim() ?? "";
-
-  if (!text) throw new Error("gemini-empty");
-
-  const places = matchMentionedPlaces(text, candidates);
-  return { engine: "gemini", text, places };
-}
-
-/** SSE gövdesindeki `data:` satırlarından metin parçalarını çıkarır. */
-function extractSseText(block: string): string {
-  let out = "";
-  for (const line of block.split("\n")) {
-    const t = line.trim();
-    if (!t.startsWith("data:")) continue;
-    const payload = t.slice(5).trim();
-    if (!payload || payload === "[DONE]") continue;
-    try {
-      const json = JSON.parse(payload) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      out +=
-        json.candidates?.[0]?.content?.parts
-          ?.map((p) => p.text ?? "")
-          .join("") ?? "";
-    } catch {
-      // Sınırda bölünmüş parça üst okumada tamamlanır; yoksay.
-    }
+  try {
+    const result = await getModel().generateContent({ contents });
+    const text = result.response.text().trim();
+    if (!text) throw new Error("gemini-empty");
+    const places = matchMentionedPlaces(text, candidates);
+    return { engine: "gemini", text, places };
+  } catch (err) {
+    throw toAuthOrRethrow(err);
   }
-  return out;
 }
 
 /**
  * Streaming çağrı: her metin parçası geldikçe `onChunk` ile birikmiş
- * metni iletir; UI cümleyi canlı döker. Akış desteklenmezse hata
- * fırlatır (çağıran tek-seferlik `recommend`'e düşer).
+ * metni iletir; UI cümleyi canlı döker.
  */
 async function callGeminiStream(
   req: AIRequest,
@@ -225,50 +171,23 @@ async function callGeminiStream(
 ): Promise<AIResponse> {
   const contents = buildContents(req, candidates, originLabel);
 
-  const res = await fetch(
-    modelUrl("streamGenerateContent", "&alt=sse"),
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: buildPayload(contents),
-    },
-  );
-
-  if (!res.ok) throw mapHttpError(res.status);
-  if (!res.body) throw new Error("gemini-no-stream");
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let full = "";
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const blocks = buf.split("\n\n");
-    buf = blocks.pop() ?? "";
-    for (const block of blocks) {
-      const piece = extractSseText(block);
+  try {
+    const result = await getModel().generateContentStream({ contents });
+    let full = "";
+    for await (const chunk of result.stream) {
+      const piece = chunk.text();
       if (piece) {
         full += piece;
         onChunk(full);
       }
     }
+    const text = full.trim();
+    if (!text) throw new Error("gemini-empty");
+    const places = matchMentionedPlaces(text, candidates);
+    return { engine: "gemini", text, places };
+  } catch (err) {
+    throw toAuthOrRethrow(err);
   }
-  const tail = extractSseText(buf);
-  if (tail) {
-    full += tail;
-    onChunk(full);
-  }
-
-  const text = full.trim();
-  if (!text) throw new Error("gemini-empty");
-
-  const places = matchMentionedPlaces(text, candidates);
-  return { engine: "gemini", text, places };
 }
 
 /** Aday mekânları yapısal bağlamdan hazırlar (mesaj taranmaz). */
@@ -329,8 +248,13 @@ export const geminiEngine: AIProvider = {
   id: "gemini-osm-engine",
 
   async recommend(req: AIRequest): Promise<AIResponse> {
-    // Anahtar boş olsa bile istek denenir; kimlik hatası olursa
-    // kullanıcıya açıklayıcı mesaj gösterilir (istemcide engelleme yok).
+    // Anahtar boşsa istemciyi yormadan önceden hata döndür.
+    if (!cleanApiKey) {
+      console.error("Gemini Key Missing");
+      throw new AIUnavailableError(
+        "Gemini API anahtarı eksik. Lütfen VITE_GEMINI_API_KEY değerini kontrol edin.",
+      );
+    }
     const { center, originLabel } = resolveCenter(req);
     const candidates = await fetchCandidates(center);
 
@@ -345,6 +269,12 @@ export const geminiEngine: AIProvider = {
     req: AIRequest,
     onChunk: (partialText: string) => void,
   ): Promise<AIResponse> {
+    if (!cleanApiKey) {
+      console.error("Gemini Key Missing");
+      throw new AIUnavailableError(
+        "Gemini API anahtarı eksik. Lütfen VITE_GEMINI_API_KEY değerini kontrol edin.",
+      );
+    }
     const { center, originLabel } = resolveCenter(req);
     const candidates = await fetchCandidates(center);
 
