@@ -50,7 +50,7 @@ function readApiKey(): string {
   }
   return cleanApiKey;
 }
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-1.5-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent`;
 
@@ -333,10 +333,19 @@ export const geminiEngine: AIProvider = {
     const { center, originLabel } = resolveCenter(req);
     const candidates = await fetchCandidates(center);
 
+    // Önce streaming dene; patlarsa (404/500/ağ) tek-seferlik
+    // generateContent'e düş. Her iki yol da aynı modeli kullanır.
     try {
       return await callGeminiStream(req, candidates, originLabel, onChunk);
-    } catch (err) {
-      mapRecommendError(err);
+    } catch (streamErr) {
+      if ((streamErr as Error).message === "gemini-auth") {
+        mapRecommendError(streamErr);
+      }
+      try {
+        return await callGemini(req, candidates, originLabel);
+      } catch (err) {
+        mapRecommendError(err);
+      }
     }
   },
 };
