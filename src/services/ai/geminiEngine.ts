@@ -51,8 +51,23 @@ function readApiKey(): string {
   return cleanApiKey;
 }
 const MODEL = "gemini-1.5-flash";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-const STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent`;
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+
+/**
+ * REST URL'yi tek noktadan kurar; model adı ve `models/` segmenti
+ * doğrulanır (çift önek / slaş kayması 404 üretmesin diye).
+ * Üretilen biçim TAM OLARAK:
+ * `{BASE}/models/gemini-1.5-flash:{generateContent|streamGenerateContent}?key=...`
+ */
+function modelUrl(
+  action: "generateContent" | "streamGenerateContent",
+  extra = "",
+): string {
+  if (MODEL !== "gemini-1.5-flash") {
+    throw new Error(`gemini-bad-model:${MODEL}`);
+  }
+  return `${API_BASE}/models/${MODEL}:${action}?key=${encodeURIComponent(cleanApiKey)}${extra}`;
+}
 
 const SYSTEM_PROMPT = `Sen Nereye Gitsem uygulamasının akıllı, samimi ve arkadaş canlısı AI Keşif Asistanısın. Kullanıcı seninle sohbet etmek istediğinde, hal hatır sorduğunda tamamen doğal bir insan gibi konuş. Yalnızca kullanıcı spesifik bir yer/mekân/gezilecek yer istediğinde lokasyon önerilerini kart yapısında sun.`;
 
@@ -149,7 +164,7 @@ async function callGemini(
   const contents = buildContents(req, candidates, originLabel);
 
   // Anahtar URL parametresiyle, kodlanmış ve tırnaksız gider.
-  const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(cleanApiKey)}`, {
+  const res = await fetch(modelUrl("generateContent"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -211,7 +226,7 @@ async function callGeminiStream(
   const contents = buildContents(req, candidates, originLabel);
 
   const res = await fetch(
-    `${STREAM_ENDPOINT}?key=${encodeURIComponent(cleanApiKey)}&alt=sse`,
+    modelUrl("streamGenerateContent", "&alt=sse"),
     {
       method: "POST",
       headers: {
