@@ -52,7 +52,7 @@ function readApiKey(): string {
 }
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-1.5-flash";
 
 /** Model istemcisi (tek noktadan; URL birleştirme yok). */
 function getModel() {
